@@ -1,13 +1,13 @@
-import { Settings } from "lucide-react";
-import { PlaceholderPage } from "@/components/ui/Primitives";
+import { getMockTours } from "@/lib/mock-data";
+import { getIndiaTodayISO } from "@/lib/utils";
+import { SettingsView } from "@/components/settings/SettingsView";
+
+// Ensure dynamic date generation on Asia/Kolkata reference time
+export const dynamic = "force-dynamic";
 
 export default function SettingsPage() {
-  return (
-    <PlaceholderPage
-      title="System Settings & Administration"
-      description="Administrative configuration, user roles and permissions, destination catalog, and Excel migration preferences. Planned for Phase 3."
-      plannedPhase="Phase 3"
-      icon={Settings}
-    />
-  );
+  const initialTours = getMockTours();
+  const today = getIndiaTodayISO();
+
+  return <SettingsView initialTours={initialTours} referenceDate={today} />;
 }
