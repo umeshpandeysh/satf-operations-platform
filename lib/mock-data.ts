@@ -13,12 +13,13 @@
 
 import type { Tour, DashboardMetrics, AttentionItem } from "./types";
 import { getIndiaTodayISO, addDaysToISO } from "./utils";
+import { getCanonicalTours, getCanonicalTourById } from "./canonical-store";
 
 /**
  * Generate a complete set of coherent, deterministic mock tours relative to
  * a given reference date (YYYY-MM-DD). Defaults to current date in Asia/Kolkata.
  */
-export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[] {
+export function getDemoTours(referenceDate: string = getIndiaTodayISO()): Tour[] {
   const t0 = referenceDate;
 
   return [
@@ -1231,6 +1232,25 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
 }
 
 /**
+ * Primary dataset accessor.
+ * Returns canonical operational tours when imported and active, or falls back to demo tours.
+ */
+export function getMockTours(
+  referenceDate: string = getIndiaTodayISO(),
+  options?: { forceDemo?: boolean }
+): Tour[] {
+  if (!options?.forceDemo) {
+    const canonical = getCanonicalTours();
+    if (canonical && canonical.length > 0) {
+      return canonical;
+    }
+  }
+  return getDemoTours(referenceDate);
+}
+
+export const getBaseTours = getMockTours;
+
+/**
  * Backward-compatible static snapshot evaluated for current Asia/Kolkata date.
  */
 export const MOCK_TOURS: Tour[] = getMockTours();
@@ -1341,11 +1361,23 @@ export function getUpcomingArrivals(
 
 /**
  * Retrieve a single tour by ID relative to referenceDate.
+ * Searches canonical dataset first, then demo tours.
  */
 export function getTourById(
   id: string,
-  referenceDate: string = getIndiaTodayISO()
+  referenceDate: string = getIndiaTodayISO(),
+  options?: { forceDemo?: boolean }
 ): Tour | undefined {
-  return getMockTours(referenceDate).find((t) => t.id === id);
+  if (!options?.forceDemo) {
+    const canonicalTour = getCanonicalTourById(id);
+    if (canonicalTour) return canonicalTour;
+  }
+  const cleanId = id.toLowerCase().trim();
+  return getDemoTours(referenceDate).find(
+    (t) =>
+      t.id.toLowerCase() === cleanId ||
+      t.bookingReference.toLowerCase() === cleanId ||
+      `satf-${t.bookingReference.toLowerCase()}` === cleanId
+  );
 }
 
