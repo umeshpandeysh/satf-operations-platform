@@ -177,6 +177,15 @@ export interface Tour {
   issues?: OperationalIssue[];
   /** Provenance reference to legacy Excel sheet & row where applicable */
   sourceProvenance?: string;
+  sourceSheet?: string;
+  sourceRow?: number;
+  sourceSheets?: string[];
+  rawArrivalSerial?: number | string;
+  hasDateAmbiguity?: boolean;
+  dateAmbiguityReason?: string;
+  agency?: string;
+  packageCode?: string;
+  isImported?: boolean;
   /** Free-text internal notes for operations staff */
   operationalNotes?: string;
   /** Explanatory cancellation reason if tour status is cancelled */
@@ -186,6 +195,61 @@ export interface Tour {
   /** ISO datetime of last record update */
   lastUpdated: string;
 }
+
+// ─── Import & Reconciliation Interfaces ──────────────────────────────────────
+
+export interface SheetImportDetail {
+  sheetName: string;
+  season: string;
+  rowsCount: number;
+  toursCount: number;
+}
+
+export interface ImportSummary {
+  workbookName: string;
+  importTimestamp: string;
+  totalSheetsFound: number;
+  operationalSheetsCount: number;
+  totalTourBlocks: number;
+  canonicalToursCount: number;
+  spanningToursCount: number;
+  amendedToursCount: number;
+  duplicateRowsCount: number;
+  dateAmbiguityCount: number;
+  unassignedGuidesCount: number;
+  sheetsSummary: SheetImportDetail[];
+}
+
+export interface ImportAmbiguityItem {
+  bookingReference: string;
+  sheet: string;
+  row: number;
+  reason: string;
+  rawSerial?: number | string;
+}
+
+export interface ImportDuplicateItem {
+  bookingReference: string;
+  sheets: string[];
+  rows: number[];
+  resolution: "merged_spanning" | "amended" | "skipped_duplicate";
+}
+
+export interface ImportErrorItem {
+  sheet: string;
+  row: number;
+  message: string;
+}
+
+export interface ImportPreviewResult {
+  success: boolean;
+  summary: ImportSummary;
+  tours: Tour[];
+  ambiguities: ImportAmbiguityItem[];
+  duplicates: ImportDuplicateItem[];
+  errors: ImportErrorItem[];
+}
+
 
 // ─── Resource Conflict Detection ─────────────────────────────────────────────
 
