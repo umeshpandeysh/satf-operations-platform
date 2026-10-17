@@ -82,6 +82,24 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
     return getUpcomingArrivalsFromTours(tours, 10, today);
   }, [tours, today]);
 
+  // Derived lifecycle status counts
+  const statusCounts = useMemo(() => {
+    const counts = {
+      all: tours.length,
+      active: 0,
+      upcoming: 0,
+      attention: 0,
+      completed: 0,
+      cancelled: 0,
+    };
+    tours.forEach((t) => {
+      if (counts[t.status] !== undefined) {
+        counts[t.status]++;
+      }
+    });
+    return counts;
+  }, [tours]);
+
   // Derived operational breakdown for dispatchers
   const todayArrivals = useMemo(() => {
     return tours.filter((t) => t.arrivalDate === today);
@@ -283,6 +301,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
             value={metrics.arrivalsToday}
             icon={PlaneLanding}
             iconClass="text-blue-700 bg-blue-50/80 border-blue-200"
+            href="/calendar"
             description={
               todayArrivals.length > 0
                 ? `${todayArrivals[0].group.groupName} (${todayArrivals[0].group.adultCount + todayArrivals[0].group.childCount} pax)`
@@ -294,6 +313,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
             value={metrics.departuresToday}
             icon={PlaneTakeoff}
             iconClass="text-slate-700 bg-slate-100 border-slate-200"
+            href="/calendar"
             description={
               todayDepartures.length > 0
                 ? `${todayDepartures[0].group.groupName}`
@@ -305,6 +325,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
             value={metrics.activeToday}
             icon={Activity}
             iconClass="text-emerald-700 bg-emerald-50/80 border-emerald-200"
+            href="/tours"
             description={
               activeMovements.length > 0
                 ? `${activeMovements.map((t) => t.destination.split(" ")[0]).join(", ")}`
@@ -320,6 +341,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                 ? "text-amber-700 bg-amber-50/80 border-amber-200"
                 : "text-slate-600 bg-slate-100 border-slate-200"
             }
+            href="/tours"
             description={
               metrics.requireAttention > 0
                 ? `${openBlockers.length} open blocker issues`
@@ -328,6 +350,66 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
           />
         </div>
       </section>
+
+      {/* ── Tour Status Lifecycle Breakdown ─────────────────────────────────── */}
+      <div className="bg-white border border-slate-200/90 rounded-lg p-3 shadow-xs">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            Tour Operations Lifecycle Breakdown
+          </span>
+          <Link
+            href="/tours"
+            className="text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-0.5"
+          >
+            <span>View All Tours Roster</span>
+            <ChevronRight size={12} />
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+          <Link
+            href="/tours"
+            className="flex flex-col p-2 rounded-md bg-slate-50 hover:bg-slate-100 border border-slate-200/80 transition-colors"
+          >
+            <span className="text-[10px] text-slate-500 font-medium">Total Roster</span>
+            <span className="text-base font-bold text-slate-900 mt-0.5 font-mono">{statusCounts.all}</span>
+          </Link>
+          <Link
+            href="/tours"
+            className="flex flex-col p-2 rounded-md bg-emerald-50/60 hover:bg-emerald-100/60 border border-emerald-200/70 transition-colors"
+          >
+            <span className="text-[10px] text-emerald-700 font-medium">Active Circuits</span>
+            <span className="text-base font-bold text-emerald-800 mt-0.5 font-mono">{statusCounts.active}</span>
+          </Link>
+          <Link
+            href="/tours"
+            className="flex flex-col p-2 rounded-md bg-blue-50/60 hover:bg-blue-100/60 border border-blue-200/70 transition-colors"
+          >
+            <span className="text-[10px] text-blue-700 font-medium">Upcoming</span>
+            <span className="text-base font-bold text-blue-800 mt-0.5 font-mono">{statusCounts.upcoming}</span>
+          </Link>
+          <Link
+            href="/tours"
+            className="flex flex-col p-2 rounded-md bg-amber-50/60 hover:bg-amber-100/60 border border-amber-200/70 transition-colors"
+          >
+            <span className="text-[10px] text-amber-700 font-medium">Needs Attention</span>
+            <span className="text-base font-bold text-amber-800 mt-0.5 font-mono">{statusCounts.attention}</span>
+          </Link>
+          <Link
+            href="/tours"
+            className="flex flex-col p-2 rounded-md bg-slate-100 hover:bg-slate-200/70 border border-slate-200 transition-colors"
+          >
+            <span className="text-[10px] text-slate-600 font-medium">Completed</span>
+            <span className="text-base font-bold text-slate-700 mt-0.5 font-mono">{statusCounts.completed}</span>
+          </Link>
+          <Link
+            href="/tours"
+            className="flex flex-col p-2 rounded-md bg-red-50/60 hover:bg-red-100/60 border border-red-200/70 transition-colors"
+          >
+            <span className="text-[10px] text-red-700 font-medium">Cancelled</span>
+            <span className="text-base font-bold text-red-800 mt-0.5 font-mono">{statusCounts.cancelled}</span>
+          </Link>
+        </div>
+      </div>
 
       {/* ── Primary Command Center Grid ──────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">

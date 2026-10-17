@@ -177,6 +177,7 @@ export interface MetricCardProps {
   iconClass?: string;
   description?: string;
   badge?: React.ReactNode;
+  href?: string;
 }
 
 export function MetricCard({
@@ -186,9 +187,10 @@ export function MetricCard({
   iconClass = "text-blue-600 bg-blue-50/80 border-blue-100",
   description,
   badge,
+  href,
 }: MetricCardProps) {
-  return (
-    <Card className="hover:border-slate-300 transition-colors">
+  const cardContent = (
+    <Card className={cn("transition-all", href && "hover:border-blue-400 hover:shadow-xs cursor-pointer")}>
       <CardContent className="p-4 sm:p-4.5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -220,6 +222,16 @@ export function MetricCard({
       </CardContent>
     </Card>
   );
+
+  if (href) {
+    return (
+      <Link href={href} className="block group focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-lg">
+        {cardContent}
+      </Link>
+    );
+  }
+
+  return cardContent;
 }
 
 // ─── Section Header ───────────────────────────────────────────────────────────
