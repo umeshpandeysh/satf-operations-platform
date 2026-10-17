@@ -16,7 +16,7 @@ import {
   SectionHeader,
   Badge,
 } from "@/components/ui/Primitives";
-import { MOCK_TOURS } from "@/lib/mock-data";
+import { getTourById } from "@/lib/mock-data";
 import {
   formatDate,
   formatDateShort,
@@ -27,11 +27,8 @@ import {
   ASSIGNMENT_STATUS_LABELS,
 } from "@/lib/utils";
 
-export function generateStaticParams() {
-  return MOCK_TOURS.map((tour) => ({
-    id: tour.id,
-  }));
-}
+// Ensure tour detail page resolves live dates dynamically at runtime
+export const dynamic = "force-dynamic";
 
 interface TourDetailPageProps {
   params: Promise<{ id: string }>;
@@ -39,7 +36,7 @@ interface TourDetailPageProps {
 
 export default async function TourDetailPage({ params }: TourDetailPageProps) {
   const { id } = await params;
-  const tour = MOCK_TOURS.find((t) => t.id === id);
+  const tour = getTourById(id);
 
   if (!tour) {
     notFound();

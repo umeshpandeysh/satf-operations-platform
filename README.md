@@ -67,16 +67,16 @@ SATF coordinates India-side travel arrangements for Japanese travellers whose to
 - Header showing current section title, responsive hamburger navigation, and authenticated operator placeholder.
 
 ### 2. Operations Dashboard (`/`)
-- **Derived Metrics Cards:** Real-time computed stats based on the deterministic operational baseline date (`2025-11-15`):
-  - *Arrivals Today* (e.g. flight arrivals matching the baseline date)
-  - *Departures Today* (flight departures on the baseline date)
+- **Derived Metrics Cards:** Real-time computed stats relative to current calendar date in India (`Asia/Kolkata`):
+  - *Arrivals Today* (e.g. flight arrivals matching the current India date)
+  - *Departures Today* (flight departures on the current India date)
   - *Active Tours* (tours currently in-progress across India)
   - *Need Attention* (tours flagged with missing resources or urgent operational blockers)
 - **Upcoming Arrivals Table:** Interactive list of arrivals over the next 10 days with relative day indicators ("Today", "Tomorrow", "In N days").
 - **Operations Attention Panel:** Instant visibility into critical tour issues (e.g., vehicle breakdowns, unassigned mountain routes, pending hotel confirmations) linking directly to tour records.
 
 ### 3. Tours Management & Filter List (`/tours`)
-- Multi-field search across booking references (e.g. `SATF-2025-001`), Japanese guest/group names, and destinations.
+- Multi-field search across booking references (e.g. `SATF-DEMO-001`), Japanese guest/group names, and destinations.
 - Status quick-filters: *All*, *Active*, *Upcoming*, *Needs Attention*, *Completed*, *Cancelled*.
 - Responsive tour table with pax count, dates, destinations, and direct navigation links.
 - Empty states for zero-match search results.
@@ -87,7 +87,7 @@ SATF coordinates India-side travel arrangements for Japanese travellers whose to
 - **Flight & Transit Legs:** International inbound/outbound flights, airlines, arrival terminals, and schedule times.
 - **Resource Allocations:** Current status of assigned guides, drivers, and vehicles (with vehicle registration details and pending badges).
 - **Hotel Accommodations:** City stays, check-in/out dates, room types, night counts, and confirmation booking numbers.
-- **Special Requests & Dietary Requirements:** Guest preferences (e.g. vegetarian, diabetic, ground-floor accessibility) with resolution tracking.
+- **Special Requests & Dietary Requirements:** Guest preferences (e.g. vegetarian, low-sugar meal requests, ground-floor accessibility) with resolution tracking.
 - Clear action affordance indicating editing operations will arrive in Phase 2.
 
 ### 5. Roadmap Module Placeholders

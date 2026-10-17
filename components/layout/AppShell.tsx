@@ -7,8 +7,8 @@ function SidebarFallback() {
   return (
     <aside className="hidden lg:flex flex-col w-60 bg-white border-r border-slate-200">
       <div className="flex items-center gap-2 h-16 px-4 border-b border-slate-200 shrink-0">
-        <div className="flex items-center justify-center w-8 h-8 rounded-md bg-blue-600 text-white text-xs font-bold shrink-0">
-          ST
+        <div className="flex items-center justify-center px-1.5 h-8 rounded-md bg-blue-700 text-white text-[11px] font-bold tracking-wider shrink-0">
+          SATF
         </div>
         <div>
           <p className="text-sm font-semibold text-slate-900 leading-tight">SATF Ops</p>

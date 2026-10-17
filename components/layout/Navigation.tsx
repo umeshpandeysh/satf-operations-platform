@@ -108,10 +108,10 @@ export function Sidebar({
         {/* Logo / wordmark */}
         <div className="flex items-center gap-2 h-16 px-4 border-b border-slate-200 shrink-0">
           <div
-            className="flex items-center justify-center w-8 h-8 rounded-md bg-blue-600 text-white text-xs font-bold shrink-0"
+            className="flex items-center justify-center px-1.5 h-8 rounded-md bg-blue-700 text-white text-[11px] font-bold tracking-wider shrink-0"
             aria-hidden="true"
           >
-            ST
+            SATF
           </div>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-slate-900 leading-tight truncate">

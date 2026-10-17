@@ -10,7 +10,7 @@ import {
   Badge,
 } from "@/components/ui/Primitives";
 import { cn } from "@/components/ui/utils";
-import { MOCK_TOURS } from "@/lib/mock-data";
+import { getMockTours } from "@/lib/mock-data";
 import type { TourStatus } from "@/lib/types";
 import {
   formatDate,
@@ -31,9 +31,11 @@ export default function ToursPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TourStatus | "all">("all");
 
+  const tours = useMemo(() => getMockTours(), []);
+
   const filtered = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return MOCK_TOURS.filter((tour) => {
+    return tours.filter((tour) => {
       const matchesStatus =
         statusFilter === "all" || tour.status === statusFilter;
       const matchesSearch =
@@ -43,7 +45,7 @@ export default function ToursPage() {
         tour.destination.toLowerCase().includes(q);
       return matchesStatus && matchesSearch;
     });
-  }, [searchQuery, statusFilter]);
+  }, [tours, searchQuery, statusFilter]);
 
   return (
     <PageContainer>

@@ -12,26 +12,30 @@ import {
   CardContent,
   SectionHeader,
   PageContainer,
+  Badge,
 } from "@/components/ui/Primitives";
-import { Badge } from "@/components/ui/Primitives";
 import {
   computeDashboardMetrics,
   getAttentionItems,
   getUpcomingArrivals,
-  DEMO_TODAY,
 } from "@/lib/mock-data";
 import {
   formatDate,
   formatDateShort,
   relativeDayLabel,
+  getIndiaTodayISO,
   TOUR_STATUS_CLASSES,
   TOUR_STATUS_LABELS,
 } from "@/lib/utils";
 
+// Ensure dashboard calculates live dates at runtime per request
+export const dynamic = "force-dynamic";
+
 export default function DashboardPage() {
-  const metrics = computeDashboardMetrics();
-  const attentionItems = getAttentionItems();
-  const upcomingArrivals = getUpcomingArrivals(10);
+  const today = getIndiaTodayISO();
+  const metrics = computeDashboardMetrics(today);
+  const attentionItems = getAttentionItems(today);
+  const upcomingArrivals = getUpcomingArrivals(10, today);
 
   return (
     <PageContainer>
@@ -40,8 +44,8 @@ export default function DashboardPage() {
         <span className="font-semibold">Demo mode</span>
         <span className="text-blue-500">·</span>
         <span>
-          All data shown is fictional and calculated relative to{" "}
-          <strong>{formatDate(DEMO_TODAY)}</strong>.
+          All operational data is fictional and generated relative to current India date:{" "}
+          <strong>{formatDate(today)} (Asia/Kolkata)</strong>.
         </span>
       </div>
 
@@ -143,7 +147,7 @@ export default function DashboardPage() {
                             {TOUR_STATUS_LABELS[tour.status]}
                           </Badge>
                           <span className="text-xs text-slate-400">
-                            {relativeDayLabel(tour.arrivalDate, DEMO_TODAY)}
+                            {relativeDayLabel(tour.arrivalDate, today)}
                           </span>
                         </div>
                       </Link>
