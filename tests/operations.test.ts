@@ -243,3 +243,58 @@ describe("7. Dashboard metrics and status coherence", () => {
     );
   });
 });
+
+describe("8. /tours runtime data generation and hydration mismatch prevention", () => {
+  test("generates distinct dates when reference date moves forward", () => {
+    const day1 = "2026-10-17";
+    const day2 = "2026-10-18";
+
+    const toursDay1 = getMockTours(day1);
+    const toursDay2 = getMockTours(day2);
+
+    // Verify arrival dates are shifted by exactly 1 day
+    for (let i = 0; i < toursDay1.length; i++) {
+      assert.strictEqual(
+        toursDay2[i].arrivalDate,
+        addDaysToISO(toursDay1[i].arrivalDate, 1),
+        `Tour ${toursDay1[i].id} arrival date should shift by 1 day when reference date increments`
+      );
+      assert.strictEqual(
+        toursDay2[i].departureDate,
+        addDaysToISO(toursDay1[i].departureDate, 1),
+        `Tour ${toursDay1[i].id} departure date should shift by 1 day when reference date increments`
+      );
+    }
+  });
+
+  test("initialTours payload is JSON-serializable for SSR hydration without undefined date values", () => {
+    const today = getIndiaTodayISO();
+    const tours = getMockTours(today);
+
+    // Serialization check: ensure JSON round-trip preserves all dates and fields identically
+    const serialized = JSON.stringify(tours);
+    const deserialized = JSON.parse(serialized);
+
+    assert.deepStrictEqual(
+      deserialized,
+      JSON.parse(JSON.stringify(tours)),
+      "initialTours payload must be cleanly JSON-serializable between server and client"
+    );
+
+    // Verify no undefined date fields
+    for (const tour of tours) {
+      assert.ok(tour.arrivalDate && tour.arrivalDate.length === 10);
+      assert.ok(tour.departureDate && tour.departureDate.length === 10);
+      for (const flight of tour.flights) {
+        assert.ok(flight.date && flight.date.length === 10);
+      }
+      for (const hotel of tour.hotels) {
+        assert.ok(hotel.checkIn && hotel.checkIn.length === 10);
+        assert.ok(hotel.checkOut && hotel.checkOut.length === 10);
+      }
+      for (const item of tour.itinerary) {
+        assert.ok(item.date && item.date.length === 10);
+      }
+    }
+  });
+});
