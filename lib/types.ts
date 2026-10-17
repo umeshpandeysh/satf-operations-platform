@@ -175,8 +175,22 @@ export interface Tour {
   sourceProvenance?: string;
   /** Free-text internal notes for operations staff */
   operationalNotes?: string;
+  /** Explanatory cancellation reason if tour status is cancelled */
+  cancellationReason?: string;
+  /** ISO datetime of cancellation */
+  cancelledAt?: string;
   /** ISO datetime of last record update */
   lastUpdated: string;
+}
+
+// ─── Resource Conflict Detection ─────────────────────────────────────────────
+
+export interface AssignmentConflict {
+  resourceType: "guide" | "driver" | "vehicle";
+  resourceIdentifier: string;
+  tourA: { id: string; bookingReference: string; groupName: string; arrivalDate: string; departureDate: string };
+  tourB: { id: string; bookingReference: string; groupName: string; arrivalDate: string; departureDate: string };
+  conflictDescription: string;
 }
 
 // ─── Dashboard-derived types ──────────────────────────────────────────────────

@@ -23,9 +23,13 @@ import {
 
 import {
   validateTourForm,
+  validateNewTourForm,
+  createNewTour,
+  cancelTour,
   applyIssueUpdate,
   cancelTourEdit,
   mergeSessionTours,
+  detectAssignmentConflicts,
 } from "../lib/operations";
 
 import {
@@ -1149,4 +1153,157 @@ describe("13. Session storage failure handling, subscriber notifications, and dr
     }
   });
 });
+
+describe("14. Tour lifecycle, creation, cancellation, and conflict detection", () => {
+  test("validateNewTourForm rejects missing or invalid required fields", () => {
+    const invalidInput = {
+      bookingReference: "BAD", // Too short (<4 chars)
+      groupName: "",
+      adultCount: 0,
+      nationality: "",
+      language: "",
+      destination: "",
+      arrivalDate: "not-a-date",
+      departureDate: "2026-10-15",
+    };
+
+    const res = validateNewTourForm(invalidInput);
+    assert.strictEqual(res.isValid, false);
+    assert.ok(res.errors.bookingReference);
+    assert.ok(res.errors.groupName);
+    assert.ok(res.errors.adultCount);
+    assert.ok(res.errors.nationality);
+    assert.ok(res.errors.language);
+    assert.ok(res.errors.destination);
+    assert.ok(res.errors.arrivalDate);
+  });
+
+  test("validateNewTourForm rejects departure before arrival and duplicate references", () => {
+    const invertedDatesInput = {
+      bookingReference: "SATF-NEW-001",
+      groupName: "Osaka Explorers",
+      adultCount: 4,
+      nationality: "Japanese",
+      language: "Japanese",
+      destination: "Golden Triangle",
+      arrivalDate: "2026-10-25",
+      departureDate: "2026-10-20", // Inverted
+    };
+
+    const res = validateNewTourForm(invertedDatesInput, ["SATF-NEW-001"]);
+    assert.strictEqual(res.isValid, false);
+    assert.ok(res.errors.departureDate);
+    assert.ok(res.errors.bookingReference); // Duplicate
+  });
+
+  test("createNewTour constructs valid Tour object with upcoming status", () => {
+    const validInput = {
+      bookingReference: "satf-new-999",
+      groupName: "Kyoto Heritage Club",
+      adultCount: 6,
+      childCount: 1,
+      nationality: "Japanese",
+      language: "Japanese",
+      destination: "Varanasi & Bodhgaya",
+      arrivalDate: "2026-11-01",
+      departureDate: "2026-11-08",
+      guideName: "Rajesh Kumar",
+      vehicleType: "Innova",
+    };
+
+    const tour = createNewTour(validInput);
+    assert.ok(tour.id.startsWith("tour-"));
+    assert.strictEqual(tour.bookingReference, "SATF-NEW-999");
+    assert.strictEqual(tour.status, "upcoming");
+    assert.strictEqual(tour.group.adultCount, 6);
+    assert.strictEqual(tour.group.childCount, 1);
+    assert.strictEqual(tour.destination, "Varanasi & Bodhgaya");
+    assert.strictEqual(tour.assignments.find((a) => a.role === "guide")?.name, "Rajesh Kumar");
+    assert.strictEqual(tour.assignments.find((a) => a.role === "vehicle")?.vehicleType, "Innova");
+    assert.ok(tour.itinerary.length >= 2);
+  });
+
+  test("mergeSessionTours includes newly created session tours not in baseline", () => {
+    const baseline = getMockTours("2026-10-17");
+    const newTour = createNewTour({
+      bookingReference: "SATF-NEW-777",
+      groupName: "Tokyo Photo Group",
+      adultCount: 10,
+      nationality: "Japanese",
+      language: "Japanese",
+      destination: "Ladakh Circuit",
+      arrivalDate: "2026-11-10",
+      departureDate: "2026-11-18",
+    });
+
+    const sessionDict = { [newTour.id]: newTour };
+    const merged = mergeSessionTours(baseline, sessionDict);
+
+    assert.strictEqual(merged.length, baseline.length + 1);
+    const found = merged.find((t) => t.id === newTour.id);
+    assert.ok(found);
+    assert.strictEqual(found.bookingReference, "SATF-NEW-777");
+  });
+
+  test("cancelTour requires explanatory reason, updates status to cancelled, and sets cancelledAt", () => {
+    const tour = getMockTours("2026-10-17")[0];
+
+    // Empty or short reason rejected
+    const badCancel = cancelTour(tour, "nope");
+    assert.strictEqual(badCancel.success, false);
+
+    // Valid cancel
+    const validCancel = cancelTour(tour, "Guest medical emergency before departure");
+    assert.strictEqual(validCancel.success, true);
+    assert.ok(validCancel.tour);
+    assert.strictEqual(validCancel.tour.status, "cancelled");
+    assert.strictEqual(validCancel.tour.cancellationReason, "Guest medical emergency before departure");
+    assert.ok(validCancel.tour.cancelledAt);
+    assert.match(validCancel.tour.operationalNotes ?? "", /Guest medical emergency/);
+
+    // Second cancel on already cancelled tour is rejected
+    const repeatCancel = cancelTour(validCancel.tour, "Already cancelled duplicate call");
+    assert.strictEqual(repeatCancel.success, false);
+  });
+
+  test("detectAssignmentConflicts accurately identifies overlapping guide and driver allocations", () => {
+    const tourA = createNewTour({
+      bookingReference: "CONF-A",
+      groupName: "Group A",
+      adultCount: 4,
+      nationality: "Japanese",
+      language: "Japanese",
+      destination: "Delhi",
+      arrivalDate: "2026-10-20",
+      departureDate: "2026-10-25",
+      guideName: "Arun Sharma",
+      driverName: "Vikram Singh",
+    });
+
+    const tourB = createNewTour({
+      bookingReference: "CONF-B",
+      groupName: "Group B",
+      adultCount: 4,
+      nationality: "Japanese",
+      language: "Japanese",
+      destination: "Agra",
+      arrivalDate: "2026-10-23", // Overlaps 2026-10-23 to 2026-10-25
+      departureDate: "2026-10-28",
+      guideName: "Arun Sharma", // Double booked!
+      driverName: "Vikram Singh", // Double booked!
+    });
+
+    const conflicts = detectAssignmentConflicts([tourA, tourB]);
+    assert.strictEqual(conflicts.length, 2);
+
+    const guideConflict = conflicts.find((c) => c.resourceType === "guide");
+    assert.ok(guideConflict);
+    assert.strictEqual(guideConflict.resourceIdentifier, "Arun Sharma");
+
+    const driverConflict = conflicts.find((c) => c.resourceType === "driver");
+    assert.ok(driverConflict);
+    assert.strictEqual(driverConflict.resourceIdentifier, "Vikram Singh");
+  });
+});
+
 
