@@ -88,14 +88,46 @@ function getDriver(): StorageDriver | null {
   return defaultMemoryDriver;
 }
 
-function getRawStorage(): string | null {
-  const driver = getDriver();
-  if (!driver) return null;
-  try {
-    return driver.getItem(SESSION_STORAGE_KEY);
-  } catch {
-    return null;
+export type StorageReadResult =
+  | { success: true; raw: string | null }
+  | { success: false; error: string };
+
+export type ParsedStorageResult =
+  | { success: true; tours: Record<string, Tour> | null }
+  | { success: false; error: string };
+
+export type SingleTourReadResult =
+  | { success: true; tour: Tour | null }
+  | { success: false; error: string };
+
+export function getRawStorageResult(): StorageReadResult {
+  if (simulatedFailure) {
+    return { success: false, error: simulatedFailure };
   }
+
+  const driver = getDriver();
+  if (!driver) {
+    return {
+      success: false,
+      error: "Browser session storage is unavailable or disabled in current environment.",
+    };
+  }
+
+  try {
+    const raw = driver.getItem(SESSION_STORAGE_KEY);
+    return { success: true, raw };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Storage read failed";
+    return {
+      success: false,
+      error: `Failed to read from session storage: ${msg}`,
+    };
+  }
+}
+
+export function getRawStorage(): string | null {
+  const result = getRawStorageResult();
+  return result.success ? result.raw : null;
 }
 
 function setRawStorage(value: string): StorageOperationResult {
@@ -168,35 +200,85 @@ function notifySubscribers(): void {
 // ─── Authoritative Public Session Store API ──────────────────────────────────
 
 /**
+ * Retrieve all modified tours stored in the current session with explicit error reporting.
+ * Distinguishes between an uninitialized key (tours: null) and an unreadable/corrupted store.
+ */
+export function getSessionToursResult(): ParsedStorageResult {
+  const readRes = getRawStorageResult();
+  if (!readRes.success) {
+    return { success: false, error: readRes.error };
+  }
+
+  // Genuinely empty storage key (not edited in this session)
+  if (readRes.raw === null || readRes.raw.trim() === "") {
+    return { success: true, tours: null };
+  }
+
+  try {
+    const parsed = JSON.parse(readRes.raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {
+        success: false,
+        error: "Corrupted session data: stored payload is not a valid tour dictionary.",
+      };
+    }
+    return { success: true, tours: parsed as Record<string, Tour> };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Invalid JSON syntax";
+    return {
+      success: false,
+      error: `Corrupted session data: failed to parse stored JSON (${msg}).`,
+    };
+  }
+}
+
+/**
  * Retrieve all modified tours stored in the current session.
+ * Returns null if no session edits exist or if storage cannot be read.
  */
 export function getSessionTours(): Record<string, Tour> | null {
-  try {
-    const raw = getRawStorage();
-    if (!raw) return null;
-    return JSON.parse(raw) as Record<string, Tour>;
-  } catch {
-    return null;
+  const result = getSessionToursResult();
+  return result.success ? result.tours : null;
+}
+
+/**
+ * Retrieve a specific tour by ID from the session with explicit error reporting.
+ */
+export function getSessionTourResult(tourId: string): SingleTourReadResult {
+  const allResult = getSessionToursResult();
+  if (!allResult.success) {
+    return { success: false, error: allResult.error };
   }
+  return {
+    success: true,
+    tour: allResult.tours ? (allResult.tours[tourId] ?? null) : null,
+  };
 }
 
 /**
  * Retrieve a specific tour by ID from the session, if edited.
  */
 export function getSessionTour(tourId: string): Tour | null {
-  const all = getSessionTours();
-  if (!all) return null;
-  return all[tourId] ?? null;
+  const result = getSessionTourResult(tourId);
+  return result.success ? result.tour : null;
 }
 
 /**
  * Save an updated tour to session storage.
- * Returns a StorageOperationResult indicating success or explicit failure.
- * Does not notify subscribers or corrupt existing data if write fails.
+ * Refuses to save if previous storage state is unreadable or corrupted,
+ * ensuring existing data is never wiped out or corrupted.
  */
 export function saveSessionTour(updatedTour: Tour): StorageOperationResult {
   try {
-    const current = getSessionTours() ?? {};
+    const readResult = getSessionToursResult();
+    if (!readResult.success) {
+      return {
+        success: false,
+        error: `Cannot save tour: ${readResult.error}`,
+      };
+    }
+
+    const current = readResult.tours ?? {};
     const next: Record<string, Tour> = {
       ...current,
       [updatedTour.id]: {
@@ -220,11 +302,20 @@ export function saveSessionTour(updatedTour: Tour): StorageOperationResult {
 
 /**
  * Clear a specific tour edit, reverting it to baseline mock data.
- * Returns a StorageOperationResult indicating success or explicit failure.
+ * Must NOT report false success if storage cannot be reliably read.
  */
 export function clearSessionTour(tourId: string): StorageOperationResult {
   try {
-    const current = getSessionTours();
+    const readResult = getSessionToursResult();
+    if (!readResult.success) {
+      return {
+        success: false,
+        error: `Cannot clear tour: ${readResult.error}`,
+      };
+    }
+
+    const current = readResult.tours;
+    // Storage read was verified and confirmed to not have edits for this tour
     if (!current || !(tourId in current)) {
       return { success: true };
     }
@@ -232,7 +323,11 @@ export function clearSessionTour(tourId: string): StorageOperationResult {
     const next = { ...current };
     delete next[tourId];
 
-    const writeResult = setRawStorage(JSON.stringify(next));
+    const writeResult =
+      Object.keys(next).length === 0
+        ? removeRawStorage()
+        : setRawStorage(JSON.stringify(next));
+
     if (!writeResult.success) {
       return writeResult;
     }

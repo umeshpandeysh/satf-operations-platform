@@ -39,6 +39,8 @@ import {
   resetSessionStoreForTesting,
   setStorageDriverForTesting,
   StorageOperationResult,
+  StorageDriver,
+  getSessionToursResult,
 } from "../lib/session-store";
 
 import { APPROVED_VEHICLE_TYPES, Tour } from "../lib/types";
@@ -674,45 +676,181 @@ describe("13. Session storage failure handling, subscriber notifications, and dr
     }
   });
 
-  test("failed save does not corrupt or overwrite previously saved session data", () => {
+  test("storage driver whose getItem() throws triggers detectable failure and does not report false success", () => {
     resetSessionStoreForTesting();
 
     try {
-      // 1. Initial successful save
+      const throwingReadDriver: StorageDriver = {
+        getItem: () => {
+          throw new Error("Quota or hardware I/O error during read");
+        },
+        setItem: () => {},
+        removeItem: () => {},
+      };
+      setStorageDriverForTesting(throwingReadDriver);
+
+      // 1. Reading returns explicit failure
+      const readResult = getSessionToursResult();
+      assert.strictEqual(readResult.success, false);
+      assert.ok(readResult.error?.includes("hardware I/O error"));
+
+      // 2. clearSessionTour must NOT return true when storage state cannot be read
+      const clearResult = clearSessionTour(baseTour.id);
+      assert.strictEqual(clearResult.success, false, "Must not return false success when storage is unreadable");
+      assert.ok(clearResult.error?.includes("hardware I/O error"));
+
+      // 3. saveSessionTour must refuse to save when storage cannot be read
+      const saveResult = saveSessionTour(baseTour);
+      assert.strictEqual(saveResult.success, false, "Must not overwrite when storage is unreadable");
+      assert.ok(saveResult.error?.includes("hardware I/O error"));
+    } finally {
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("distinguishes genuinely empty storage from an unreadable storage failure", () => {
+    resetSessionStoreForTesting();
+
+    try {
+      // Case A: Genuinely empty storage key (no driver error) -> clearing non-existent tour is safe no-op
+      const emptyResult = clearSessionTour("tour-non-existent");
+      assert.strictEqual(emptyResult.success, true, "Empty store returns true for non-existent tour");
+
+      // Case B: Unreadable storage (driver throws) -> clearing non-existent tour MUST report failure
+      const brokenDriver: StorageDriver = {
+        getItem: () => {
+          throw new Error("SecurityError: Access is denied");
+        },
+        setItem: () => {},
+        removeItem: () => {},
+      };
+      setStorageDriverForTesting(brokenDriver);
+
+      const unreadableResult = clearSessionTour("tour-non-existent");
+      assert.strictEqual(
+        unreadableResult.success,
+        false,
+        "Unreadable store must report failure, not false success"
+      );
+      assert.ok(unreadableResult.error?.includes("Access is denied"));
+    } finally {
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("failed save and failed clear operations preserve previously saved session data without corruption", () => {
+    resetSessionStoreForTesting();
+
+    try {
+      let backingStore: Record<string, string> = {};
+      let failNextOperation: "none" | "read" | "write" = "none";
+
+      const controllableDriver: StorageDriver = {
+        getItem: (k) => {
+          if (failNextOperation === "read") {
+            throw new Error("Simulated storage read error");
+          }
+          return backingStore[k] ?? null;
+        },
+        setItem: (k, v) => {
+          if (failNextOperation === "write") {
+            throw new Error("Simulated storage write error");
+          }
+          backingStore[k] = v;
+        },
+        removeItem: (k) => {
+          delete backingStore[k];
+        },
+      };
+
+      setStorageDriverForTesting(controllableDriver);
+
+      // 1. Initial valid save
       const initialTour: Tour = {
         ...baseTour,
-        operationalNotes: "Initial verified operational note A",
+        operationalNotes: "Original Preserved Data A",
       };
       const initialSave = saveSessionTour(initialTour);
       assert.strictEqual(initialSave.success, true);
+      assert.strictEqual(getSessionTour(baseTour.id)?.operationalNotes, "Original Preserved Data A");
 
-      // Verify stored
-      assert.strictEqual(getSessionTour(baseTour.id)?.operationalNotes, "Initial verified operational note A");
-
-      // 2. Next save fails due to storage failure
-      simulateStorageFailureForTesting("DiskIOError: Simulated write failure");
-
-      const brokenTour: Tour = {
+      // 2. Storage write throws: save fails
+      failNextOperation = "write";
+      const failedSave = saveSessionTour({
         ...baseTour,
-        operationalNotes: "Corrupted note B that should fail",
-      };
-      const failedSave = saveSessionTour(brokenTour);
+        operationalNotes: "Corrupted Note B",
+      });
       assert.strictEqual(failedSave.success, false);
 
-      // 3. Verify original stored data remains untouched
-      simulateStorageFailureForTesting(null); // allow reading
-      const preserved = getSessionTour(baseTour.id);
+      // Verify original data is preserved
+      failNextOperation = "none";
       assert.strictEqual(
-        preserved?.operationalNotes,
-        "Initial verified operational note A",
-        "Previously saved data must remain intact when subsequent save fails"
+        getSessionTour(baseTour.id)?.operationalNotes,
+        "Original Preserved Data A",
+        "Data preserved after write failure"
+      );
+
+      // 3. Storage read throws: clear fails
+      failNextOperation = "read";
+      const failedClear = clearSessionTour(baseTour.id);
+      assert.strictEqual(failedClear.success, false);
+
+      // Verify original data is still preserved
+      failNextOperation = "none";
+      assert.strictEqual(
+        getSessionTour(baseTour.id)?.operationalNotes,
+        "Original Preserved Data A",
+        "Data preserved after clear failure"
       );
     } finally {
       resetSessionStoreForTesting();
     }
   });
 
-  test("clearSessionTour() and clearAllSessionTours() return detectable error when storage fails", () => {
+  test("corrupted JSON payload in storage is safely rejected and protected from overwriting", () => {
+    resetSessionStoreForTesting();
+
+    try {
+      let rawData = "{ invalid JSON syntax / payload";
+      const corruptDriver: StorageDriver = {
+        getItem: () => rawData,
+        setItem: (k, v) => {
+          rawData = v;
+        },
+        removeItem: () => {
+          rawData = "";
+        },
+      };
+      setStorageDriverForTesting(corruptDriver);
+
+      // Reading detects corruption
+      const readResult = getSessionToursResult();
+      assert.strictEqual(readResult.success, false);
+      assert.ok(readResult.error?.includes("Corrupted session data"));
+
+      // Saving refuses to overwrite corrupted payload
+      const saveResult = saveSessionTour(baseTour);
+      assert.strictEqual(saveResult.success, false);
+      assert.strictEqual(
+        rawData,
+        "{ invalid JSON syntax / payload",
+        "Corrupted storage must not be overwritten by saveSessionTour"
+      );
+
+      // Clearing refuses to operate on corrupted payload
+      const clearResult = clearSessionTour(baseTour.id);
+      assert.strictEqual(clearResult.success, false);
+      assert.strictEqual(
+        rawData,
+        "{ invalid JSON syntax / payload",
+        "Corrupted storage must not be overwritten by clearSessionTour"
+      );
+    } finally {
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("clearSessionTour() and clearAllSessionTours() return detectable error when write fails", () => {
     resetSessionStoreForTesting();
 
     try {
@@ -762,11 +900,11 @@ describe("13. Session storage failure handling, subscriber notifications, and dr
     }
   });
 
-  test("UI draft preservation contract: failed save keeps draft intact and does not report success", () => {
+  test("UI draft preservation contract simulation (Node test runner without headless browser / DOM automation): failed save keeps draft intact and does not report success", () => {
     resetSessionStoreForTesting();
 
-    // Simulate modal edit controller logic:
-    // User edits draft fields
+    // Contract simulation: Validates the state and error transition flow shared between EditTourModal and TourDetailClient.
+    // Note: This project test runner executes via Node.js tsx --test without a DOM / jsdom environment; real browser-level DOM interaction is simulated via state contract.
     const draftState = {
       driverName: "Operator Draft Driver",
       vehicleNumber: "HR 26 DQ 9999",
