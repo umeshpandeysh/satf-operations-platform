@@ -1,4 +1,4 @@
-import { getMockTours } from "@/lib/mock-data";
+import { getBaseTours } from "@/lib/server-tours";
 import { getIndiaTodayISO } from "@/lib/utils";
 import { DashboardView } from "@/components/dashboard/DashboardView";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const today = getIndiaTodayISO();
-  const initialTours = getMockTours(today);
+  const initialTours = getBaseTours(today);
 
   return <DashboardView initialTours={initialTours} today={today} />;
 }

@@ -1,4 +1,4 @@
-import { getMockTours } from "@/lib/mock-data";
+import { getBaseTours } from "@/lib/server-tours";
 import { getIndiaTodayISO } from "@/lib/utils";
 import { CalendarView } from "@/components/calendar/CalendarView";
 
@@ -6,7 +6,7 @@ import { CalendarView } from "@/components/calendar/CalendarView";
 export const dynamic = "force-dynamic";
 
 export default function CalendarPage() {
-  const initialTours = getMockTours();
+  const initialTours = getBaseTours();
   const today = getIndiaTodayISO();
 
   return <CalendarView initialTours={initialTours} referenceDate={today} />;

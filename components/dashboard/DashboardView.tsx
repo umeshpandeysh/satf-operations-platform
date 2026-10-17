@@ -242,7 +242,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
           </span>
           <span className="hidden md:inline text-slate-400">·</span>
           <span className="hidden md:inline text-slate-500 truncate">
-            Asia/Kolkata (IST UTC+5:30) · Demo operational records
+            Asia/Kolkata (IST UTC+5:30) · {tours.some((t) => t.isImported) ? "Real Operational Dataset" : "Demo operational records"}
           </span>
         </div>
 
@@ -261,8 +261,14 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
             </button>
           </div>
         ) : (
-          <span className="text-[11px] text-slate-400 font-mono hidden sm:inline">
-            Baseline Mock Dataset
+          <span className="text-[11px] font-mono hidden sm:inline">
+            {tours.some((t) => t.isImported) ? (
+              <span className="text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                Operational Dataset Active ({tours.length} Tours)
+              </span>
+            ) : (
+              <span className="text-slate-400">Baseline Mock Dataset</span>
+            )}
           </span>
         )}
       </div>

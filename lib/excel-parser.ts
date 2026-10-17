@@ -1,10 +1,10 @@
 import * as XLSX from "xlsx";
 import type {
   Tour,
-  ItineraryDay,
-  HotelBooking,
-  FlightBooking,
-  StaffAssignment,
+  ItineraryEntry,
+  HotelStay,
+  FlightLeg,
+  ResourceAssignment,
   SpecialRequest,
   ImportSummary,
   ImportPreviewResult,
@@ -13,6 +13,7 @@ import type {
   ImportErrorItem,
   SheetImportDetail,
   TourStatus,
+  VehicleType,
 } from "./types";
 
 export interface ParseOptions {
@@ -97,9 +98,9 @@ export function extractGuestAndPax(cellVal: unknown): { guestName: string; pax: 
 /**
  * Extract flight codes and airline name from subrow string.
  */
-export function extractFlights(rawSubrow: string, date: string, bookingRef: string): FlightBooking[] {
+export function extractFlights(rawSubrow: string, date: string, bookingRef: string): FlightLeg[] {
   if (!rawSubrow) return [];
-  const flights: FlightBooking[] = [];
+  const flights: FlightLeg[] = [];
   const flightRegex = /\b([A-Z0-9]{2,3})[- ]?(\d{2,4})\b/g;
   let match;
   let idx = 1;
@@ -139,7 +140,7 @@ export function extractFlights(rawSubrow: string, date: string, bookingRef: stri
 /**
  * Extract guide assignment from subrow.
  */
-export function extractGuideAssignment(guideRowVal: string, bookingRef: string): StaffAssignment {
+export function extractGuideAssignment(guideRowVal: string, bookingRef: string): ResourceAssignment {
   const raw = String(guideRowVal || "").trim();
   let name = raw;
   if (name.toUpperCase().startsWith("G-")) {
@@ -173,16 +174,15 @@ export function extractGuideAssignment(guideRowVal: string, bookingRef: string):
 /**
  * Extract vehicle assignment from flight/transport subrow.
  */
-export function extractVehicleAssignment(transRowVal: string, bookingRef: string): StaffAssignment | null {
+export function extractVehicleAssignment(transRowVal: string, bookingRef: string): ResourceAssignment | null {
   const raw = String(transRowVal || "").trim();
   if (!raw) return null;
 
-  let vehicleType = "Standard Tourist Vehicle";
-  if (raw.toUpperCase().includes("URBANIA")) vehicleType = "Force Urbania";
-  else if (raw.toUpperCase().includes("INNOVA")) vehicleType = "Toyota Innova Crysta";
+  let vehicleType: VehicleType = "Other";
+  if (raw.toUpperCase().includes("URBANIA")) vehicleType = "Urbania";
+  else if (raw.toUpperCase().includes("INNOVA")) vehicleType = "Innova";
   else if (raw.toUpperCase().includes("TEMPO") || raw.toUpperCase().includes("T-")) vehicleType = "Tempo Traveller";
-  else if (raw.toUpperCase().includes("SEDAN")) vehicleType = "AC Sedan";
-  else if (raw.toUpperCase().includes("COACH") || raw.toUpperCase().includes("BUS")) vehicleType = "Large Tourist Coach";
+  else if (raw.toUpperCase().includes("SEDAN")) vehicleType = "Sedan";
 
   return {
     id: `asn-${bookingRef}-veh`,
@@ -234,8 +234,8 @@ export function inferCircuitDestination(itineraryTexts: string[], packageCode: s
 export function extractHotels(
   itineraryDays: Array<{ date: string; activity: string }>,
   bookingRef: string
-): HotelBooking[] {
-  const hotels: HotelBooking[] = [];
+): HotelStay[] {
+  const hotels: HotelStay[] = [];
   const hotelRegex = /(?:H-\s*|HOTEL\s+)([A-Za-z0-9\s&'-]+?)(?=(?:\s+(?:ARR|TRF|SS|BSB|DEL|JAI|AGRA|VNS|APT|\/)|$))/gi;
   let hotelIndex = 1;
 
@@ -401,7 +401,7 @@ export function parseExcelWorkbook(
       const { guestName, pax } = extractGuestAndPax(c4);
       const guideAssignment = extractGuideAssignment(sub2Val, refStr);
       const vehicleAssignment = extractVehicleAssignment(sub1Val, refStr);
-      const assignments: StaffAssignment[] = [guideAssignment];
+      const assignments: ResourceAssignment[] = [guideAssignment];
       if (vehicleAssignment) assignments.push(vehicleAssignment);
 
       const flights = extractFlights(sub1Val, arrivalDate, refStr);
@@ -419,15 +419,16 @@ export function parseExcelWorkbook(
           id: `sr-${refStr}-1`,
           category: operationalNotes.toUpperCase().includes("MEAL") || operationalNotes.toUpperCase().includes("VEG")
             ? "dietary"
-            : "general",
+            : "other",
           description: operationalNotes,
+          resolved: false,
         });
       }
 
       // Build itinerary objects
-      const itinerary: ItineraryDay[] = itineraryDays.map((d, i) => {
+      const itinerary: ItineraryEntry[] = itineraryDays.map((d, i) => {
         const actUp = d.activity.toUpperCase();
-        let type: ItineraryDay["type"] = "sightseeing";
+        let type: ItineraryEntry["type"] = "sightseeing";
         if (actUp.includes("ARR")) type = "arrival_transfer";
         else if (actUp.includes("APT") || actUp.includes("DEP")) type = "departure_transfer";
         else if (actUp.includes("TRF") || actUp.includes("TR ")) type = "transfer";
@@ -454,7 +455,7 @@ export function parseExcelWorkbook(
       const hotels = extractHotels(itineraryDays, refStr);
 
       // Tour status computation
-      let status: TourStatus = "confirmed";
+      let status: TourStatus = "upcoming";
       if (operationalNotes.toUpperCase().includes("CANCEL")) {
         status = "cancelled";
       }
@@ -569,7 +570,7 @@ export function parseExcelWorkbook(
             id: `itn-${ref}-${i + 1}`,
             date: d.date,
             startTime: "09:00",
-            type: "sightseeing",
+            type: "sightseeing" as const,
             title: d.activity,
             location: "Delhi",
             durationMinutes: 180,

@@ -35,6 +35,8 @@ import {
 } from "@/lib/session-store";
 import { formatDate } from "@/lib/utils";
 
+import { ExcelImportManager } from "./ExcelImportManager";
+
 export interface SettingsViewProps {
   initialTours: Tour[];
   referenceDate: string;
@@ -149,6 +151,9 @@ export function SettingsView({ initialTours, referenceDate }: SettingsViewProps)
           </div>
         </div>
       </div>
+
+      {/* ── Excel Operational Dataset Integration & Reconciliation ──────────── */}
+      <ExcelImportManager />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* ── Operational Environment & Timezone ──────────────────────────────── */}

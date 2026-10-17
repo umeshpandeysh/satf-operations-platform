@@ -95,11 +95,11 @@ describe("Excel Parser — Core Extraction & Utility Functions", () => {
   test("extractVehicleAssignment extracts vehicle models from transport rows", () => {
     const urbania = extractVehicleAssignment("JL-39 T-URBANIA", "1253572");
     assert.ok(urbania);
-    assert.strictEqual(urbania.vehicleType, "Force Urbania");
+    assert.strictEqual(urbania.vehicleType, "Urbania");
 
     const innova = extractVehicleAssignment("INNOVA CRYSTAL", "1253572");
     assert.ok(innova);
-    assert.strictEqual(innova.vehicleType, "Toyota Innova Crysta");
+    assert.strictEqual(innova.vehicleType, "Innova");
 
     const none = extractVehicleAssignment("", "1253572");
     assert.strictEqual(none, null);

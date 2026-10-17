@@ -1,4 +1,4 @@
-import { getMockTours } from "@/lib/mock-data";
+import { getBaseTours } from "@/lib/server-tours";
 import { getIndiaTodayISO } from "@/lib/utils";
 import { AssignmentsView } from "@/components/assignments/AssignmentsView";
 
@@ -6,7 +6,7 @@ import { AssignmentsView } from "@/components/assignments/AssignmentsView";
 export const dynamic = "force-dynamic";
 
 export default function AssignmentsPage() {
-  const initialTours = getMockTours();
+  const initialTours = getBaseTours();
   const today = getIndiaTodayISO();
 
   return <AssignmentsView initialTours={initialTours} referenceDate={today} />;

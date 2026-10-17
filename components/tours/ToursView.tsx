@@ -15,6 +15,7 @@ import {
   AlertCircle,
   PlusCircle,
   CheckCircle2,
+  FileSpreadsheet,
 } from "lucide-react";
 import {
   PageContainer,
@@ -75,11 +76,24 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TourStatus | "all">("all");
+  const [sheetFilter, setSheetFilter] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 25;
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   const existingReferences = useMemo(() => {
     return tours.map((t) => t.bookingReference);
+  }, [tours]);
+
+  const hasImportedTours = useMemo(() => tours.some((t) => t.isImported), [tours]);
+
+  const sheets = useMemo(() => {
+    const s = new Set<string>();
+    tours.forEach((t) => {
+      if (t.sourceSheet) s.add(t.sourceSheet);
+    });
+    return Array.from(s).sort();
   }, [tours]);
 
   // Live status counts
@@ -105,19 +119,47 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
     return tours.filter((tour) => {
       const matchesStatus =
         statusFilter === "all" || tour.status === statusFilter;
+      const matchesSheet =
+        sheetFilter === "all" || tour.sourceSheet === sheetFilter;
       const matchesSearch =
         !q ||
         tour.bookingReference.toLowerCase().includes(q) ||
         tour.group.groupName.toLowerCase().includes(q) ||
         tour.destination.toLowerCase().includes(q) ||
         tour.group.nationality.toLowerCase().includes(q) ||
+        (tour.agency && tour.agency.toLowerCase().includes(q)) ||
         tour.assignments.some((a) => a.name?.toLowerCase().includes(q));
-      return matchesStatus && matchesSearch;
+      return matchesStatus && matchesSheet && matchesSearch;
     });
-  }, [tours, searchQuery, statusFilter]);
+  }, [tours, searchQuery, statusFilter, sheetFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const paginatedTours = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, safeCurrentPage, pageSize]);
 
   return (
     <PageContainer>
+      {/* Live operational dataset indicator banner */}
+      {hasImportedTours && (
+        <div className="bg-emerald-50/80 border border-emerald-200/90 rounded-lg p-3 text-xs text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet size={16} className="text-emerald-600 shrink-0" />
+            <span>
+              <strong>Active Operational Dataset:</strong> Showing {tours.length} verified tours parsed from SATF Operations Chart. All sheet provenance and raw date serials preserved.
+            </span>
+          </div>
+          <Link
+            href="/settings"
+            className="font-semibold text-emerald-700 hover:text-emerald-900 underline shrink-0 text-[11px]"
+          >
+            Manage Import & Reconciliation
+          </Link>
+        </div>
+      )}
+
       {/* Session storage read failure alert */}
       {sessionState.status === "error" && (
         <div
@@ -145,14 +187,20 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
               type="search"
               placeholder="Filter by ref, group, destination, guide, or nationality…"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
               className="w-full pl-9 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-300/80 rounded-md text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
               aria-label="Filter tours"
             />
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => setSearchQuery("")}
+                onClick={() => {
+                  setSearchQuery("");
+                  setCurrentPage(1);
+                }}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                 aria-label="Clear search"
               >
@@ -183,7 +231,10 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
             return (
               <button
                 key={tab.value}
-                onClick={() => setStatusFilter(tab.value as TourStatus | "all")}
+                onClick={() => {
+                  setStatusFilter(tab.value as TourStatus | "all");
+                  setCurrentPage(1);
+                }}
                 className={cn(
                   "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
                   isSelected
@@ -206,6 +257,25 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
               </button>
             );
           })}
+
+          {sheets.length > 0 && (
+            <div className="flex items-center gap-1.5 ml-auto pl-2 border-l border-slate-200">
+              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Sheet:</span>
+              <select
+                value={sheetFilter}
+                onChange={(e) => {
+                  setSheetFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="bg-slate-50 border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="all">All Sheets ({sheets.length})</option>
+                {sheets.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -280,7 +350,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((tour) => {
+                {paginatedTours.map((tour) => {
                   const guide = tour.assignments.find((a) => a.role === "guide");
                   const vehicle = tour.assignments.find((a) => a.role === "vehicle");
                   const driver = tour.assignments.find((a) => a.role === "driver");
@@ -300,10 +370,35 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                       <td className="py-2.5 px-3 font-mono text-xs font-bold text-blue-700 whitespace-nowrap">
                         <Link
                           href={`/tours/${tour.id}`}
-                          className="hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                          className="hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded block"
                         >
                           {tour.bookingReference}
                         </Link>
+                        {tour.isImported && (
+                          <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                            <span className="text-[9px] font-mono font-normal text-slate-500 bg-slate-100 px-1 py-0.2 rounded border border-slate-200">
+                              {tour.sourceSheet}:{tour.sourceRow}
+                            </span>
+                            {tour.agency && (
+                              <span className="text-[9px] font-mono font-bold text-blue-700 bg-blue-50 px-1 py-0.2 rounded">
+                                {tour.agency}
+                              </span>
+                            )}
+                            {tour.hasDateAmbiguity && (
+                              <span
+                                className="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1 py-0.2 rounded cursor-help"
+                                title={tour.dateAmbiguityReason}
+                              >
+                                Ambiguous
+                              </span>
+                            )}
+                            {tour.sourceSheets && tour.sourceSheets.length > 1 && (
+                              <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 py-0.2 rounded">
+                                Spanning ({tour.sourceSheets.length})
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       {/* Group Name & Pax */}
@@ -395,6 +490,38 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination Controls */}
+        {filtered.length > pageSize && (
+          <div className="p-3 border-t border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <span className="text-slate-600 font-medium">
+              Showing <strong className="text-slate-900 font-mono">{(currentPage - 1) * pageSize + 1}</strong> to{" "}
+              <strong className="text-slate-900 font-mono">{Math.min(currentPage * pageSize, filtered.length)}</strong> of{" "}
+              <strong className="text-slate-900 font-mono">{filtered.length}</strong> matching records
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 disabled:opacity-40 hover:bg-slate-100 font-medium transition-colors"
+              >
+                Previous
+              </button>
+              <span className="px-2 font-mono text-slate-700 font-semibold">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 disabled:opacity-40 hover:bg-slate-100 font-medium transition-colors"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
 

@@ -296,17 +296,57 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
               </p>
             </div>
 
-            {/* Compact Provenance / Prototype Note */}
+            {/* Provenance & Workbook Context */}
             <div className="p-2.5 rounded-md bg-slate-50 border border-slate-200 text-[11px] text-slate-600 lg:max-w-xs shrink-0">
               <div className="flex items-center gap-1.5 font-semibold text-slate-800 mb-0.5">
                 <FileSpreadsheet size={13} className="text-blue-600" />
-                <span>Format Provenance Context</span>
+                <span>{tour.isImported ? "Workbook Provenance" : "Format Provenance"}</span>
               </div>
-              <p className="text-[10px] text-slate-500 leading-tight">
-                {tour.sourceProvenance || "Illustrative operational format fixture"}.
-              </p>
+              {tour.isImported ? (
+                <div className="text-[10px] space-y-0.5 leading-tight">
+                  <p className="text-slate-700">
+                    Sheet: <strong className="font-mono text-slate-900">{tour.sourceSheet}</strong> · Row: <span className="font-mono">{tour.sourceRow}</span>
+                  </p>
+                  {tour.agency && (
+                    <p className="text-slate-600">
+                      Agency: <strong className="font-mono text-blue-700">{tour.agency}</strong>
+                      {tour.packageCode && ` · Pkg: ${tour.packageCode}`}
+                    </p>
+                  )}
+                  {tour.rawArrivalSerial && (
+                    <p className="text-slate-500 font-mono">
+                      Arrival Serial: {String(tour.rawArrivalSerial)}
+                    </p>
+                  )}
+                  {tour.sourceSheets && tour.sourceSheets.length > 1 && (
+                    <p className="text-emerald-700 font-medium">
+                      Spanning Sheets: {tour.sourceSheets.join(", ")}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  {tour.sourceProvenance || "Illustrative operational format fixture"}.
+                </p>
+              )}
             </div>
           </div>
+
+          {/* Date Ambiguity Alert */}
+          {tour.hasDateAmbiguity && (
+            <div
+              role="alert"
+              className="mt-3 bg-amber-50 border border-amber-300 rounded-md p-2.5 text-xs text-amber-900 flex items-start gap-2 shadow-xs"
+            >
+              <AlertTriangle size={15} className="text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="block font-semibold">Date Ambiguity Flagged (Original Preserved)</strong>
+                <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                  {tour.dateAmbiguityReason || "Sheet indicated season year differs from calculated serial date. Preserved faithfully without automated alteration."}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100 text-xs">

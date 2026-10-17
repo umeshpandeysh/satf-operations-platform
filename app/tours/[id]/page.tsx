@@ -1,4 +1,4 @@
-import { getTourById } from "@/lib/mock-data";
+import { getTourById } from "@/lib/server-tours";
 import { TourDetailClient } from "@/components/tours/TourDetailClient";
 
 // Ensure tour detail page resolves live dates dynamically at runtime

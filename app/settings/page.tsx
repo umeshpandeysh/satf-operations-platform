@@ -1,4 +1,4 @@
-import { getMockTours } from "@/lib/mock-data";
+import { getBaseTours } from "@/lib/server-tours";
 import { getIndiaTodayISO } from "@/lib/utils";
 import { SettingsView } from "@/components/settings/SettingsView";
 
@@ -6,7 +6,7 @@ import { SettingsView } from "@/components/settings/SettingsView";
 export const dynamic = "force-dynamic";
 
 export default function SettingsPage() {
-  const initialTours = getMockTours();
+  const initialTours = getBaseTours();
   const today = getIndiaTodayISO();
 
   return <SettingsView initialTours={initialTours} referenceDate={today} />;

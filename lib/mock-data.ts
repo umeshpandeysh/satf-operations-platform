@@ -13,7 +13,6 @@
 
 import type { Tour, DashboardMetrics, AttentionItem } from "./types";
 import { getIndiaTodayISO, addDaysToISO } from "./utils";
-import { getCanonicalTours, getCanonicalTourById } from "./canonical-store";
 
 /**
  * Generate a complete set of coherent, deterministic mock tours relative to
@@ -1232,23 +1231,18 @@ export function getDemoTours(referenceDate: string = getIndiaTodayISO()): Tour[]
 }
 
 /**
- * Primary dataset accessor.
- * Returns canonical operational tours when imported and active, or falls back to demo tours.
+ * Deterministic mock demo dataset generator (used for demo mode and baseline testing).
  */
-export function getMockTours(
-  referenceDate: string = getIndiaTodayISO(),
-  options?: { forceDemo?: boolean }
-): Tour[] {
-  if (!options?.forceDemo) {
-    const canonical = getCanonicalTours();
-    if (canonical && canonical.length > 0) {
-      return canonical;
-    }
-  }
+export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[] {
   return getDemoTours(referenceDate);
 }
 
-export const getBaseTours = getMockTours;
+/**
+ * Primary dataset accessor for mock baseline data.
+ */
+export function getBaseTours(referenceDate: string = getIndiaTodayISO()): Tour[] {
+  return getMockTours(referenceDate);
+}
 
 /**
  * Backward-compatible static snapshot evaluated for current Asia/Kolkata date.
@@ -1360,18 +1354,12 @@ export function getUpcomingArrivals(
 }
 
 /**
- * Retrieve a single tour by ID relative to referenceDate.
- * Searches canonical dataset first, then demo tours.
+ * Retrieve a single tour by ID relative to referenceDate from demo tours.
  */
 export function getTourById(
   id: string,
-  referenceDate: string = getIndiaTodayISO(),
-  options?: { forceDemo?: boolean }
+  referenceDate: string = getIndiaTodayISO()
 ): Tour | undefined {
-  if (!options?.forceDemo) {
-    const canonicalTour = getCanonicalTourById(id);
-    if (canonicalTour) return canonicalTour;
-  }
   const cleanId = id.toLowerCase().trim();
   return getDemoTours(referenceDate).find(
     (t) =>

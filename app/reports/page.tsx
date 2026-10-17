@@ -1,4 +1,4 @@
-import { getMockTours } from "@/lib/mock-data";
+import { getBaseTours } from "@/lib/server-tours";
 import { getIndiaTodayISO } from "@/lib/utils";
 import { ReportsView } from "@/components/reports/ReportsView";
 
@@ -6,7 +6,7 @@ import { ReportsView } from "@/components/reports/ReportsView";
 export const dynamic = "force-dynamic";
 
 export default function ReportsPage() {
-  const initialTours = getMockTours();
+  const initialTours = getBaseTours();
   const today = getIndiaTodayISO();
 
   return <ReportsView initialTours={initialTours} referenceDate={today} />;
