@@ -154,10 +154,10 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
           <div className="flex items-center gap-2">
             <FileSpreadsheet size={15} className="text-slate-500 shrink-0" />
             <span>
-              <strong>Excel Provenance:</strong> {tour.sourceProvenance}
+              <strong>Format Context:</strong> {tour.sourceProvenance}
             </span>
           </div>
-          <span className="text-[11px] text-slate-400">Preserved original sheet/row reference</span>
+          <span className="text-[11px] text-slate-400">Illustrative format sample</span>
         </div>
       )}
 
@@ -430,9 +430,16 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
                   className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100 last:border-0 last:pb-0"
                 >
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      {assignment.role}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        {assignment.role}
+                      </p>
+                      {assignment.vehicleType && (
+                        <span className="text-[10px] font-semibold bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
+                          {assignment.vehicleType}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm font-semibold text-slate-800 mt-0.5">
                       {assignment.name || (
                         <span className="text-slate-400 italic font-normal">Unassigned</span>

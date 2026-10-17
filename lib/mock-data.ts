@@ -204,6 +204,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           role: "vehicle",
           status: "assigned",
           reference: "RJ-14-AB-1234",
+          vehicleType: "Tempo Traveller",
           notes: "Tempo Traveller — 10-seater",
         },
       ],
@@ -222,7 +223,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
         },
       ],
       issues: [],
-      sourceProvenance: "Legacy Chart Sheet AUG-19 (Row 2, STW #1151933)",
+      sourceProvenance: "Illustrative format sample (modelled on legacy chart structure; fictional demo record, not verified provenance)",
       operationalNotes:
         "Tour is currently active in Rajasthan. All hotels confirmed. Guide checked in on schedule.",
     },
@@ -404,6 +405,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           id: "asn-002c",
           role: "vehicle",
           status: "unassigned",
+          vehicleType: "Innova",
           notes: "Vehicle to be allocated alongside driver confirmation.",
         },
       ],
@@ -423,7 +425,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           resolved: false,
         },
       ],
-      sourceProvenance: "Legacy Chart Sheet JULY-19 (Row 2, STW #1151757)",
+      sourceProvenance: "Illustrative format sample (modelled on legacy chart structure; fictional demo record, not verified provenance)",
       operationalNotes:
         "Upcoming arrival in 2 days. Driver and vehicle allocation must be finalized before arrival.",
     },
@@ -605,6 +607,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           id: "asn-003c",
           role: "vehicle",
           status: "pending",
+          vehicleType: "Tempo Traveller",
           notes: "Primary vehicle breakdown reported this morning. Replacement vehicle dispatch in progress.",
         },
       ],
@@ -630,7 +633,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           resolved: false,
         },
       ],
-      sourceProvenance: "Legacy Chart Sheet OCT 2025 (Row 2, STW #1253572)",
+      sourceProvenance: "Illustrative format sample (modelled on legacy chart structure; fictional demo tour, not verified provenance)",
       operationalNotes:
         "ATTENTION: Primary vehicle breakdown reported this morning. Replacement vehicle dispatch in progress. Hotel Pink City Classic Jaipur confirmation number pending.",
     },
@@ -803,6 +806,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           id: "asn-004c",
           role: "vehicle",
           status: "unassigned",
+          vehicleType: "Other",
           notes: "4WD vehicle mandatory for Rohtang Pass sector.",
         },
       ],
@@ -827,7 +831,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           resolved: false,
         },
       ],
-      sourceProvenance: "Legacy Chart Sheet JAN 2026 (Row 2, STW #1253602, Flagged: year serial mismatch 2025)",
+      sourceProvenance: "Illustrative format sample (modelled on legacy chart structure; flags year/serial date ambiguity for demonstration; not verified provenance)",
       operationalNotes:
         "ATTENTION: Mountain-certified guide and 4WD vehicle unassigned. Rohtang Pass permit pending confirmation with Himachal transport authorities.",
     },
@@ -1012,6 +1016,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           role: "vehicle",
           status: "assigned",
           reference: "KA-01-MM-5678",
+          vehicleType: "Tempo Traveller",
           notes: "Tempo Traveller — 14-seater",
         },
       ],
@@ -1024,7 +1029,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
         },
       ],
       issues: [],
-      sourceProvenance: "Legacy Chart Sheet MAY-19 (Row 2, STW #1129637)",
+      sourceProvenance: "Illustrative format sample (modelled on legacy chart structure; fictional demo record, not verified provenance)",
       operationalNotes: "Tour completed successfully. Post-tour debrief and feedback received.",
     },
 
@@ -1199,6 +1204,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           role: "vehicle",
           status: "assigned",
           reference: "UP-32-CD-9876",
+          vehicleType: "Tempo Traveller",
           notes: "Tempo Traveller — 18-seater",
         },
       ],
@@ -1217,7 +1223,7 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
         },
       ],
       issues: [],
-      sourceProvenance: "Legacy Chart Sheet SEP-19 (Row 2, STW #1159402)",
+      sourceProvenance: "Illustrative format sample (modelled on legacy chart structure; fictional demo record, not verified provenance)",
       operationalNotes:
         "All bookings confirmed. Guide briefed on pilgrimage etiquette. Temple permissions confirmed.",
     },
@@ -1232,14 +1238,13 @@ export const MOCK_TOURS: Tour[] = getMockTours();
 // ─── Derived dashboard data ──────────────────────────────────────────────────
 
 /**
- * Compute dashboard metrics from the mock tour dataset relative to a reference date.
- * Defaults to current India date.
+ * Pure function: Compute dashboard metrics directly from a list of tours relative to a reference date.
  */
-export function computeDashboardMetrics(
+export function computeDashboardMetricsFromTours(
+  tours: Tour[],
   referenceDate: string = getIndiaTodayISO()
 ): DashboardMetrics {
   const today = referenceDate;
-  const tours = getMockTours(today);
 
   const arrivalsToday = tours.filter(
     (t) => t.arrivalDate === today && t.status !== "cancelled"
@@ -1264,12 +1269,10 @@ export function computeDashboardMetrics(
 }
 
 /**
- * Derive attention items — tours that need immediate action relative to referenceDate.
+ * Pure function: Derive attention items directly from a list of tours.
  */
-export function getAttentionItems(
-  referenceDate: string = getIndiaTodayISO()
-): AttentionItem[] {
-  return getMockTours(referenceDate)
+export function getAttentionItemsFromTours(tours: Tour[]): AttentionItem[] {
+  return tours
     .filter((t) => t.status === "attention")
     .map((t) => ({
       tourId: t.id,
@@ -1280,15 +1283,15 @@ export function getAttentionItems(
 }
 
 /**
- * Tours arriving within the next N days from referenceDate (inclusive of today).
+ * Pure function: Derive upcoming arrivals directly from a list of tours.
  */
-export function getUpcomingArrivals(
+export function getUpcomingArrivalsFromTours(
+  tours: Tour[],
   days = 10,
   referenceDate: string = getIndiaTodayISO()
 ): Tour[] {
   const today = referenceDate;
   const toDate = addDaysToISO(today, days);
-  const tours = getMockTours(today);
 
   return tours
     .filter((t) => {
@@ -1303,6 +1306,40 @@ export function getUpcomingArrivals(
 }
 
 /**
+ * Compute dashboard metrics relative to referenceDate, optionally with custom or session-modified tours.
+ */
+export function computeDashboardMetrics(
+  referenceDate: string = getIndiaTodayISO(),
+  customTours?: Tour[]
+): DashboardMetrics {
+  const tours = customTours ?? getMockTours(referenceDate);
+  return computeDashboardMetricsFromTours(tours, referenceDate);
+}
+
+/**
+ * Derive attention items relative to referenceDate, optionally with custom or session-modified tours.
+ */
+export function getAttentionItems(
+  referenceDate: string = getIndiaTodayISO(),
+  customTours?: Tour[]
+): AttentionItem[] {
+  const tours = customTours ?? getMockTours(referenceDate);
+  return getAttentionItemsFromTours(tours);
+}
+
+/**
+ * Tours arriving within the next N days from referenceDate, optionally with custom or session-modified tours.
+ */
+export function getUpcomingArrivals(
+  days = 10,
+  referenceDate: string = getIndiaTodayISO(),
+  customTours?: Tour[]
+): Tour[] {
+  const tours = customTours ?? getMockTours(referenceDate);
+  return getUpcomingArrivalsFromTours(tours, days, referenceDate);
+}
+
+/**
  * Retrieve a single tour by ID relative to referenceDate.
  */
 export function getTourById(
@@ -1311,3 +1348,4 @@ export function getTourById(
 ): Tour | undefined {
   return getMockTours(referenceDate).find((t) => t.id === id);
 }
+

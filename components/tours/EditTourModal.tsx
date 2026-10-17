@@ -8,7 +8,8 @@ import {
   AlertCircle,
   Info,
 } from "lucide-react";
-import type { Tour, TourStatus, AssignmentStatus, OperationalIssue } from "@/lib/types";
+import type { Tour, TourStatus, AssignmentStatus, OperationalIssue, VehicleType } from "@/lib/types";
+import { validateTourForm, applyIssueUpdate } from "@/lib/operations";
 
 interface EditTourModalProps {
   tour: Tour;
@@ -29,6 +30,15 @@ const ASSIGNMENT_STATUS_OPTIONS: Array<{ value: AssignmentStatus; label: string 
   { value: "assigned", label: "Assigned" },
   { value: "pending", label: "Pending" },
   { value: "unassigned", label: "Unassigned" },
+];
+
+const VEHICLE_TYPE_OPTIONS: Array<{ value: VehicleType; label: string }> = [
+  { value: "Urbania", label: "Urbania" },
+  { value: "Innova", label: "Innova" },
+  { value: "Tempo Traveller", label: "Tempo Traveller" },
+  { value: "Sedan", label: "Sedan" },
+  { value: "Gatiman/train", label: "Gatiman/train" },
+  { value: "Other", label: "Other" },
 ];
 
 export function EditTourModal({
@@ -61,6 +71,9 @@ export function EditTourModal({
     vehicleAssignment?.status ?? "unassigned"
   );
   const [vehicleRef, setVehicleRef] = useState(vehicleAssignment?.reference ?? "");
+  const [vehicleType, setVehicleType] = useState<VehicleType | "">(
+    vehicleAssignment?.vehicleType ?? ""
+  );
   const [vehicleNotes, setVehicleNotes] = useState(vehicleAssignment?.notes ?? "");
 
   // Hotel confirmation (Optional field)
@@ -78,7 +91,6 @@ export function EditTourModal({
 
   const modalRef = useRef<HTMLDivElement>(null);
 
-
   // Keyboard accessibility: Escape to cancel
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -94,22 +106,55 @@ export function EditTourModal({
 
   // Toggle single issue resolution independently
   function handleToggleIssue(issueId: string) {
-    setIssues((prev) =>
-      prev.map((iss) => {
-        if (iss.id === issueId) {
-          const nextResolved = !iss.resolved;
-          return {
-            ...iss,
-            resolved: nextResolved,
-            resolvedAt: nextResolved ? new Date().toISOString() : undefined,
-          };
-        }
-        return iss;
-      })
-    );
+    const targetIssue = issues.find((i) => i.id === issueId);
+    if (!targetIssue) return;
+
+    if (!targetIssue.resolved) {
+      // Explanatory resolution notes are mandatory before marking resolved!
+      if (!targetIssue.resolutionNotes || !targetIssue.resolutionNotes.trim()) {
+        setErrors((prev) => ({
+          ...prev,
+          [`issue_${issueId}_notes`]:
+            "Explanatory resolution note is required before marking this issue resolved.",
+        }));
+        return;
+      }
+
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[`issue_${issueId}_notes`];
+        return next;
+      });
+
+      setIssues((prev) =>
+        applyIssueUpdate(prev, issueId, {
+          resolved: true,
+          resolutionNotes: (targetIssue.resolutionNotes ?? "").trim(),
+        })
+      );
+    } else {
+      // Reopening issue
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[`issue_${issueId}_notes`];
+        return next;
+      });
+      setIssues((prev) =>
+        applyIssueUpdate(prev, issueId, {
+          resolved: false,
+        })
+      );
+    }
   }
 
   function handleIssueNotesChange(issueId: string, notes: string) {
+    if (errors[`issue_${issueId}_notes`] && notes.trim()) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[`issue_${issueId}_notes`];
+        return next;
+      });
+    }
     setIssues((prev) =>
       prev.map((iss) => (iss.id === issueId ? { ...iss, resolutionNotes: notes } : iss))
     );
@@ -118,15 +163,21 @@ export function EditTourModal({
   function handleSave(e: React.FormEvent) {
     e.preventDefault();
 
-    // Inline validation rules
-    const newErrors: Record<string, string> = {};
+    // Inline validation using shared production rules
+    const validation = validateTourForm({
+      guideStatus,
+      guideName,
+      driverName,
+      driverNotes,
+      vehicleStatus,
+      vehicleRef,
+      vehicleType,
+      hotelConfirmation,
+      issues,
+    });
 
-    if (guideStatus === "assigned" && !guideName.trim()) {
-      newErrors.guideName = "Guide name is required when guide status is marked as 'Assigned'.";
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
+    if (!validation.isValid) {
+      setErrors(validation.errors);
       return;
     }
 
@@ -153,6 +204,7 @@ export function EditTourModal({
           ...assignment,
           status: vehicleStatus,
           reference: vehicleRef.trim() || undefined,
+          vehicleType: (vehicleType as VehicleType) || undefined,
           notes: vehicleNotes.trim() || undefined,
         };
       }
@@ -223,13 +275,13 @@ export function EditTourModal({
           </div>
         </div>
 
-        {/* Source Provenance (Read-Only) */}
+        {/* Source Provenance Notice (Read-Only) */}
         {tour.sourceProvenance && (
           <div className="bg-slate-100/70 border-b border-slate-200 px-6 py-2 flex items-center justify-between text-[11px] text-slate-600 shrink-0">
             <span>
-              <strong>Excel Provenance:</strong> {tour.sourceProvenance}
+              <strong>Format Context:</strong> {tour.sourceProvenance}
             </span>
-            <span className="text-slate-400">Preserved original source</span>
+            <span className="text-slate-400">Illustrative format sample</span>
           </div>
         )}
 
@@ -288,7 +340,7 @@ export function EditTourModal({
                 <input
                   type="text"
                   id="guide-name"
-                  placeholder="e.g. Ramesh Kumar (G-RAMESH)"
+                  placeholder="e.g. Ramesh Kumar"
                   value={guideName}
                   onChange={(e) => {
                     setGuideName(e.target.value);
@@ -323,7 +375,7 @@ export function EditTourModal({
             </div>
           </div>
 
-          {/* Section 3: Transport & Vehicle Allocation (Optional fields) */}
+          {/* Section 3: Transport & Vehicle Allocation */}
           <div className="space-y-3 pt-3 border-t border-slate-100">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -349,6 +401,41 @@ export function EditTourModal({
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label htmlFor="vehicle-type" className="block text-xs font-medium text-slate-600 mb-1">
+                  Vehicle Type / Category <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
+                <select
+                  id="vehicle-type"
+                  value={vehicleType}
+                  onChange={(e) => {
+                    setVehicleType(e.target.value as VehicleType | "");
+                    if (errors.vehicleType) {
+                      setErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.vehicleType;
+                        return next;
+                      });
+                    }
+                  }}
+                  className={`w-full text-sm bg-white border rounded-lg px-3 py-2 text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                    errors.vehicleType ? "border-red-400 bg-red-50/30" : "border-slate-200"
+                  }`}
+                >
+                  <option value="">Select vehicle category…</option>
+                  {VEHICLE_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                {errors.vehicleType && (
+                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                    <AlertCircle size={13} /> {errors.vehicleType}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -434,7 +521,7 @@ export function EditTourModal({
             </div>
           </div>
 
-          {/* Section 5: Discrete Operational Issues (Independent Resolution) */}
+          {/* Section 5: Discrete Independent Issues */}
           <div className="space-y-3 pt-3 border-t border-slate-100">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -443,7 +530,7 @@ export function EditTourModal({
               <span className="text-[11px] text-slate-400">Independent resolution</span>
             </div>
             <p className="text-[11px] text-slate-500">
-              Each issue is resolved independently. Resolving one blocker leaves remaining issues untouched.
+              Each issue is resolved independently. Explanatory resolution notes are mandatory before an issue can be marked resolved.
             </p>
 
             {issues.length === 0 ? (
@@ -493,24 +580,35 @@ export function EditTourModal({
                       </button>
                     </div>
 
-                    {issue.resolved && (
-                      <div className="mt-2.5 pt-2 border-t border-slate-200/70">
-                        <label
-                          htmlFor={`res-notes-${issue.id}`}
-                          className="block text-[11px] font-medium text-slate-600 mb-1"
-                        >
-                          Resolution Action Taken <span className="text-slate-400 font-normal">(Optional audit note)</span>
-                        </label>
-                        <input
-                          type="text"
-                          id={`res-notes-${issue.id}`}
-                          placeholder="e.g. Replacement Innova dispatched from Delhi hub"
-                          value={issue.resolutionNotes ?? ""}
-                          onChange={(e) => handleIssueNotesChange(issue.id, e.target.value)}
-                          className="w-full text-xs bg-white border border-slate-200 rounded px-2.5 py-1.5 text-slate-800"
-                        />
-                      </div>
-                    )}
+                    <div className="mt-2.5 pt-2 border-t border-slate-200/70">
+                      <label
+                        htmlFor={`res-notes-${issue.id}`}
+                        className="block text-[11px] font-medium text-slate-600 mb-1"
+                      >
+                        Resolution Action Taken / Notes{" "}
+                        <span className="text-slate-500 font-normal">
+                          {issue.resolved ? "(Required — recorded audit note)" : "(Required to mark resolved)"}
+                        </span>
+                      </label>
+                      <input
+                        type="text"
+                        id={`res-notes-${issue.id}`}
+                        placeholder="e.g. Replacement vehicle arranged via Delhi hub"
+                        value={issue.resolutionNotes ?? ""}
+                        onChange={(e) => handleIssueNotesChange(issue.id, e.target.value)}
+                        className={`w-full text-xs bg-white border rounded px-2.5 py-1.5 text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                          errors[`issue_${issue.id}_notes`]
+                            ? "border-red-400 bg-red-50/30"
+                            : "border-slate-200"
+                        }`}
+                        aria-invalid={errors[`issue_${issue.id}_notes`] ? "true" : undefined}
+                      />
+                      {errors[`issue_${issue.id}_notes`] && (
+                        <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                          <AlertCircle size={13} /> {errors[`issue_${issue.id}_notes`]}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -527,34 +625,28 @@ export function EditTourModal({
               rows={3}
               value={operationalNotes}
               onChange={(e) => setOperationalNotes(e.target.value)}
-              placeholder="Add ground coordination notes, daily schedule alerts, or transit notes..."
-              className="w-full text-xs bg-white border border-slate-200 rounded-lg p-3 text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              placeholder="Add internal handover remarks, flight tracker updates, or specific guest instructions…"
+              className="w-full text-sm bg-white border border-slate-200 rounded-lg p-3 text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 placeholder:text-slate-400"
             />
           </div>
-        </form>
 
-        {/* Footer with Save / Cancel Actions */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-slate-50/70 shrink-0">
-          <p className="text-xs text-slate-400">
-            Cancel discards all modifications safely.
-          </p>
-          <div className="flex items-center gap-2.5">
+          {/* Form Action Buttons */}
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               Cancel
             </button>
             <button
               type="submit"
-              form="edit-tour-form"
-              className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
-              Save Changes
+              Save Operations Changes
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

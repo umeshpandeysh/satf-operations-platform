@@ -16,7 +16,26 @@ import {
   computeDashboardMetrics,
   getAttentionItems,
   getUpcomingArrivals,
+  computeDashboardMetricsFromTours,
+  getAttentionItemsFromTours,
+  getUpcomingArrivalsFromTours,
 } from "../lib/mock-data";
+
+import {
+  validateTourForm,
+  applyIssueUpdate,
+  cancelTourEdit,
+  mergeSessionTours,
+} from "../lib/operations";
+
+import {
+  saveSessionTour,
+  getSessionTour,
+  clearSessionTour,
+  clearAllSessionTours,
+} from "../lib/session-store";
+
+import { APPROVED_VEHICLE_TYPES } from "../lib/types";
 
 describe("1. Asia/Kolkata reference date calculation", () => {
   test("getIndiaTodayISO() returns valid YYYY-MM-DD format", () => {
@@ -299,146 +318,296 @@ describe("8. /tours runtime data generation and hydration mismatch prevention", 
   });
 });
 
-describe("9. Operational issue independence, status decoupling, and Excel provenance", () => {
+describe("9. Provenance integrity and illustrative format notices", () => {
   const refDate = "2026-10-17";
 
-  test("tours maintain Excel sheet provenance without silent date correction", () => {
-    const tour = getTourById("tour-003", refDate);
-    assert.ok(tour, "tour-003 must exist");
-    assert.ok(tour.sourceProvenance, "tour-003 must include source provenance");
-    assert.match(
-      tour.sourceProvenance,
-      /Legacy Chart Sheet OCT 2025 \(Row 2, STW #1253572\)/,
-      "tour-003 provenance must trace to STW #1253572"
-    );
+  test("all mock tours clearly state illustrative format and do not claim unverified provenance", () => {
+    const tours = getMockTours(refDate);
 
-    // Verify date anomaly comment preservation on tour-004
+    for (const tour of tours) {
+      assert.ok(tour.sourceProvenance, `Tour ${tour.id} must define sourceProvenance`);
+      assert.match(
+        tour.sourceProvenance,
+        /Illustrative format sample/i,
+        `Tour ${tour.id} must be explicitly labeled as an illustrative format sample`
+      );
+      assert.match(
+        tour.sourceProvenance,
+        /not verified provenance/i,
+        `Tour ${tour.id} must explicitly state it is not verified provenance`
+      );
+    }
+  });
+
+  test("tour-004 preserves date serial ambiguity notice without false verification claim", () => {
     const tour4 = getTourById("tour-004", refDate);
     assert.ok(tour4, "tour-004 must exist");
-    assert.ok(tour4.sourceProvenance, "tour-004 must include source provenance");
     assert.match(
-      tour4.sourceProvenance,
-      /Legacy Chart Sheet JAN 2026 \(Row 2, STW #1253602, Flagged: year serial mismatch 2025\)/,
-      "tour-004 must flag the year/serial date ambiguity"
+      tour4.sourceProvenance ?? "",
+      /flags year\/serial date ambiguity for demonstration/i,
+      "tour-004 must flag the year/serial date ambiguity illustratively"
+    );
+  });
+});
+
+describe("10. Shared production validation: validateTourForm", () => {
+  test("mandatory resolution note: rejects issue marked resolved when resolutionNotes is empty", () => {
+    const validation = validateTourForm({
+      guideStatus: "unassigned",
+      guideName: "",
+      vehicleStatus: "unassigned",
+      issues: [
+        {
+          id: "iss-1",
+          category: "guide",
+          description: "Guide missing",
+          resolved: true,
+          resolutionNotes: "   ", // Blank / whitespace
+        },
+      ],
+    });
+
+    assert.strictEqual(validation.isValid, false);
+    assert.strictEqual(
+      validation.errors["issue_iss-1_notes"],
+      "Explanatory resolution note is required before marking this issue resolved."
     );
   });
 
-  test("resolving one operational issue leaves other open issues untouched", () => {
-    const tour = getTourById("tour-003", refDate);
-    assert.ok(tour && tour.issues && tour.issues.length >= 2, "tour-003 must have multiple issues");
+  test("mandatory resolution note: accepts issue marked resolved when resolutionNotes is provided", () => {
+    const validation = validateTourForm({
+      guideStatus: "unassigned",
+      guideName: "",
+      vehicleStatus: "unassigned",
+      issues: [
+        {
+          id: "iss-1",
+          category: "guide",
+          description: "Guide missing",
+          resolved: true,
+          resolutionNotes: "Guide Ramesh assigned and briefed on itinerary.",
+        },
+      ],
+    });
 
-    const issues = [...tour.issues];
-    const initialIssue1 = issues[0];
-    const initialIssue2 = issues[1];
-
-    assert.strictEqual(initialIssue1.resolved, false);
-    assert.strictEqual(initialIssue2.resolved, false);
-
-    // Simulate resolving only the first issue
-    const updatedIssues = issues.map((iss) =>
-      iss.id === initialIssue1.id
-        ? { ...iss, resolved: true, resolutionNotes: "Guide assigned by phone" }
-        : iss
-    );
-
-    const resolvedItem = updatedIssues.find((i) => i.id === initialIssue1.id);
-    const untouchedItem = updatedIssues.find((i) => i.id === initialIssue2.id);
-
-    assert.strictEqual(resolvedItem?.resolved, true, "Target issue must be marked resolved");
-    assert.strictEqual(untouchedItem?.resolved, false, "Second issue must remain unresolved");
+    assert.strictEqual(validation.isValid, true);
+    assert.strictEqual(validation.errors["issue_iss-1_notes"], undefined);
   });
 
-  test("resolving all operational issues does not auto-mutate tour status", () => {
-    const tour = getTourById("tour-003", refDate);
-    assert.ok(tour);
-    assert.strictEqual(tour.status, "attention", "tour-003 starts in attention status");
+  test("guide validation: guide name is required only when guideStatus is assigned", () => {
+    // Assigned without name fails
+    const invalid = validateTourForm({
+      guideStatus: "assigned",
+      guideName: "   ",
+      vehicleStatus: "unassigned",
+      issues: [],
+    });
+    assert.strictEqual(invalid.isValid, false);
+    assert.strictEqual(
+      invalid.errors.guideName,
+      "Guide name is required when guide status is marked as 'Assigned'."
+    );
 
-    // Simulate resolving all issues
-    const allResolvedIssues = (tour.issues ?? []).map((iss) => ({
-      ...iss,
+    // Assigned with name passes
+    const valid = validateTourForm({
+      guideStatus: "assigned",
+      guideName: "Sunil Sharma",
+      vehicleStatus: "unassigned",
+      issues: [],
+    });
+    assert.strictEqual(valid.isValid, true);
+    assert.strictEqual(valid.errors.guideName, undefined);
+
+    // Pending or unassigned without name passes
+    const validPending = validateTourForm({
+      guideStatus: "pending",
+      guideName: "",
+      vehicleStatus: "unassigned",
+      issues: [],
+    });
+    assert.strictEqual(validPending.isValid, true);
+  });
+
+  test("structured vehicle type: validates approved categories and permits blank optional", () => {
+    for (const vType of APPROVED_VEHICLE_TYPES) {
+      const valid = validateTourForm({
+        guideStatus: "unassigned",
+        guideName: "",
+        vehicleStatus: "assigned",
+        vehicleType: vType,
+        issues: [],
+      });
+      assert.strictEqual(valid.isValid, true);
+    }
+
+    // Invalid vehicle type fails
+    const invalid = validateTourForm({
+      guideStatus: "unassigned",
+      guideName: "",
+      vehicleStatus: "assigned",
+      vehicleType: "Helicopter",
+      issues: [],
+    });
+    assert.strictEqual(invalid.isValid, false);
+    assert.match(invalid.errors.vehicleType ?? "", /Vehicle type must be one of:/);
+
+    // Blank optional vehicle fields pass
+    const blankOptional = validateTourForm({
+      guideStatus: "unassigned",
+      guideName: "",
+      driverName: "",
+      driverNotes: "",
+      vehicleStatus: "unassigned",
+      vehicleRef: "",
+      vehicleType: "",
+      hotelConfirmation: "",
+      issues: [],
+    });
+    assert.strictEqual(blankOptional.isValid, true);
+  });
+});
+
+describe("11. Shared production operations: applyIssueUpdate and cancelTourEdit", () => {
+  const initialIssues = [
+    {
+      id: "iss-1",
+      category: "guide" as const,
+      description: "Guide pending",
+      resolved: false,
+    },
+    {
+      id: "iss-2",
+      category: "vehicle" as const,
+      description: "Vehicle maintenance pending",
+      resolved: false,
+    },
+  ];
+
+  test("applyIssueUpdate resolves target issue independently without mutating peer issues", () => {
+    const updated = applyIssueUpdate(initialIssues, "iss-1", {
       resolved: true,
-      resolutionNotes: "Resolved",
-    }));
+      resolutionNotes: "Guide Sunil confirmed",
+    });
 
-    // Reconstruct tour with resolved issues but preserving tour status
-    const tourWithResolvedIssues = {
-      ...tour,
-      issues: allResolvedIssues,
+    assert.strictEqual(updated.length, 2);
+    assert.strictEqual(updated[0].resolved, true);
+    assert.strictEqual(updated[0].resolutionNotes, "Guide Sunil confirmed");
+    assert.ok(updated[0].resolvedAt, "Must record resolution timestamp");
+
+    // Peer issue must remain completely untouched
+    assert.strictEqual(updated[1].resolved, false);
+    assert.strictEqual(updated[1].resolutionNotes, undefined);
+    assert.strictEqual(updated[1].resolvedAt, undefined);
+  });
+
+  test("applyIssueUpdate reopening an issue clears resolution timestamp", () => {
+    const resolvedState = applyIssueUpdate(initialIssues, "iss-1", {
+      resolved: true,
+      resolutionNotes: "Guide Sunil confirmed",
+    });
+    assert.ok(resolvedState[0].resolvedAt);
+
+    const reopenedState = applyIssueUpdate(resolvedState, "iss-1", {
+      resolved: false,
+    });
+    assert.strictEqual(reopenedState[0].resolved, false);
+    assert.strictEqual(reopenedState[0].resolvedAt, undefined);
+  });
+
+  test("cancelTourEdit discards in-progress draft changes and preserves saved state", () => {
+    const savedTour = getTourById("tour-003", "2026-10-17");
+    assert.ok(savedTour);
+
+    // Call shared production function cancelTourEdit
+    const cancelled = cancelTourEdit(savedTour);
+
+    assert.deepStrictEqual(cancelled, savedTour, "cancelTourEdit must return saved tour intact");
+  });
+});
+
+describe("12. Shared session store and dashboard-derived reactivity", () => {
+  const refDate = "2026-10-17";
+  const baselineTours = getMockTours(refDate);
+
+  test("saveSessionTour and mergeSessionTours dynamically update tour list", () => {
+    clearAllSessionTours();
+
+    const targetTour = getTourById("tour-003", refDate);
+    assert.ok(targetTour);
+    assert.strictEqual(targetTour.status, "attention");
+
+    // Modify tour-003 in session store: change status to active
+    const modifiedTour = {
+      ...targetTour,
+      status: "active" as const,
+      operationalNotes: "Attention cleared by operations coordinator",
+    };
+    saveSessionTour(modifiedTour);
+
+    // Retrieve via session store
+    const retrieved = getSessionTour("tour-003");
+    assert.ok(retrieved);
+    assert.strictEqual(retrieved.status, "active");
+
+    // Merge session tours over baseline
+    const merged = mergeSessionTours(baselineTours, { "tour-003": retrieved });
+    const mergedTarget = merged.find((t) => t.id === "tour-003");
+    assert.strictEqual(mergedTarget?.status, "active");
+
+    // Baseline tour-001 remains unchanged
+    const mergedTour1 = merged.find((t) => t.id === "tour-001");
+    assert.strictEqual(mergedTour1?.status, "active");
+
+    // Clear session tour
+    clearSessionTour("tour-003");
+    assert.strictEqual(getSessionTour("tour-003"), null);
+  });
+
+  test("dashboard metrics, attention items, and upcoming arrivals reflect session-modified tours", () => {
+    const today = refDate;
+    const initialMetrics = computeDashboardMetricsFromTours(baselineTours, today);
+    const initialAttention = getAttentionItemsFromTours(baselineTours);
+
+    assert.strictEqual(initialMetrics.requireAttention, 2);
+    assert.strictEqual(initialAttention.length, 2);
+    assert.ok(initialAttention.some((item) => item.tourId === "tour-003"));
+
+    // Simulate operator resolving tour-003 and explicitly marking it active
+    const tour3 = getTourById("tour-003", today)!;
+    const modifiedTour3 = {
+      ...tour3,
+      status: "active" as const,
+      operationalNotes: "All issues resolved and vehicle confirmed",
     };
 
-    // The tour status must remain "attention" unless the operator explicitly signs off
+    const sessionMergedTours = mergeSessionTours(baselineTours, {
+      "tour-003": modifiedTour3,
+    });
+
+    // Derive metrics and attention items using shared production functions
+    const reactiveMetrics = computeDashboardMetricsFromTours(sessionMergedTours, today);
+    const reactiveAttention = getAttentionItemsFromTours(sessionMergedTours);
+    const reactiveArrivals = getUpcomingArrivalsFromTours(sessionMergedTours, 10, today);
+
+    // Require attention count drops from 2 to 1
+    assert.strictEqual(reactiveMetrics.requireAttention, 1);
+    assert.strictEqual(reactiveAttention.length, 1);
+
+    // tour-003 is removed from attention items
     assert.strictEqual(
-      tourWithResolvedIssues.status,
-      "attention",
-      "Resolving all issues must not automatically change tour status away from attention"
+      reactiveAttention.some((item) => item.tourId === "tour-003"),
+      false,
+      "Resolved tour must be dynamically removed from attention items"
+    );
+
+    // Active tours count increases
+    assert.strictEqual(reactiveMetrics.activeToday, initialMetrics.activeToday + 1);
+
+    // Upcoming arrivals include tour-003 as active arrival today
+    assert.ok(
+      reactiveArrivals.some((tour) => tour.id === "tour-003"),
+      "Upcoming arrivals list dynamically reflects session-updated tour status"
     );
   });
 });
 
-describe("10. Tour editing validation, cancel safety, and prototype persistence", () => {
-  const refDate = "2026-10-17";
-
-  test("inline validation: guide name is required only when guide status is assigned", () => {
-    function validateTourEdit(guideStatus: string, guideName: string) {
-      const errors: Record<string, string> = {};
-      if (guideStatus === "assigned" && !guideName.trim()) {
-        errors.guideName = "Guide name is required when status is assigned";
-      }
-      return errors;
-    }
-
-    // Invalid: status is assigned but name is empty
-    const errors1 = validateTourEdit("assigned", "   ");
-    assert.strictEqual(
-      errors1.guideName,
-      "Guide name is required when status is assigned"
-    );
-
-    // Valid: status is assigned and name is provided
-    const errors2 = validateTourEdit("assigned", "Sunil Sharma");
-    assert.strictEqual(errors2.guideName, undefined);
-
-    // Valid: status is pending or unassigned with empty name
-    const errors3 = validateTourEdit("pending", "");
-    assert.strictEqual(errors3.guideName, undefined);
-
-    const errors4 = validateTourEdit("unassigned", "");
-    assert.strictEqual(errors4.guideName, undefined);
-  });
-
-  test("optional fields (driver phone, vehicle plate, hotel confirmation) pass validation when blank", () => {
-    function validateOptionalFields(
-      driverNotes: string,
-      vehiclePlate: string,
-      hotelConf: string
-    ) {
-      // Per approved Phase 2 scope, these remain strictly optional until verified with SATF ops
-      const errors: Record<string, string> = {};
-      // No required checks for optional fields
-      return { isValid: Object.keys(errors).length === 0, errors };
-    }
-
-    const result = validateOptionalFields("", "", "");
-    assert.strictEqual(result.isValid, true);
-    assert.strictEqual(Object.keys(result.errors).length, 0);
-  });
-
-  test("cancel safety: discarding modal edits leaves original tour unchanged", () => {
-    const originalTour = getTourById("tour-003", refDate);
-    assert.ok(originalTour);
-
-    // Snapshot original data
-    const originalSnapshot = JSON.stringify(originalTour);
-
-    // Simulate in-memory draft edits
-    let draft = { ...originalTour, operationalNotes: "DRAFT_NEVER_SAVED" };
-    draft = { ...draft, status: "completed" };
-
-    // User hits Cancel: discard draft
-    draft = JSON.parse(originalSnapshot);
-
-    assert.strictEqual(draft.operationalNotes, originalTour.operationalNotes);
-    assert.strictEqual(draft.status, originalTour.status);
-    assert.deepStrictEqual(draft, originalTour);
-  });
-});

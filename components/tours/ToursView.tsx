@@ -15,6 +15,7 @@ import {
   subscribeSessionStore,
   getSessionSnapshot,
   getServerSnapshot,
+  mergeSessionTours,
 } from "@/lib/session-store";
 import {
   formatDate,
@@ -53,8 +54,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
   }, [sessionRaw]);
 
   const tours = useMemo(() => {
-    if (!sessionTours) return initialTours;
-    return initialTours.map((tour) => sessionTours[tour.id] ?? tour);
+    return mergeSessionTours(initialTours, sessionTours);
   }, [initialTours, sessionTours]);
 
   const [searchQuery, setSearchQuery] = useState("");

@@ -33,6 +33,23 @@ export type ItineraryEntryType =
 
 export type RoomType = "single" | "double" | "twin" | "triple" | "suite";
 
+export type VehicleType =
+  | "Urbania"
+  | "Innova"
+  | "Tempo Traveller"
+  | "Sedan"
+  | "Gatiman/train"
+  | "Other";
+
+export const APPROVED_VEHICLE_TYPES: readonly VehicleType[] = [
+  "Urbania",
+  "Innova",
+  "Tempo Traveller",
+  "Sedan",
+  "Gatiman/train",
+  "Other",
+] as const;
+
 // ─── Sub-entities ────────────────────────────────────────────────────────────
 
 export interface FlightLeg {
@@ -86,6 +103,8 @@ export interface ResourceAssignment {
   name?: string;
   /** e.g. vehicle registration, guide ID */
   reference?: string;
+  /** Approved structured vehicle type */
+  vehicleType?: VehicleType;
   notes?: string;
 }
 

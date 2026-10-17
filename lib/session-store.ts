@@ -7,24 +7,78 @@
  *    and are NOT shared between staff or other browsers.
  * 3. Fallback: Automatically falls back to deterministic mock baseline data
  *    if session storage is unavailable or cleared.
+ * 4. Node/Testing Support: Includes in-memory fallback for unit testing in Node
+ *    without browser globals.
  */
 
 import type { Tour } from "./types";
+export { mergeSessionTours } from "./operations";
 
 const SESSION_STORAGE_KEY = "satf_prototype_tours_session_v1";
 const SESSION_EVENT = "satf-session-store-update";
+
+const memoryStorage: Record<string, string> = {};
+const memoryListeners = new Set<() => void>();
 
 function isBrowser(): boolean {
   return typeof window !== "undefined" && typeof window.sessionStorage !== "undefined";
 }
 
+function getRawStorage(): string | null {
+  if (isBrowser()) {
+    try {
+      return window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+  return memoryStorage[SESSION_STORAGE_KEY] ?? null;
+}
+
+function setRawStorage(value: string): void {
+  if (isBrowser()) {
+    try {
+      window.sessionStorage.setItem(SESSION_STORAGE_KEY, value);
+    } catch {
+      // Session storage quota or privacy mode error handled gracefully
+    }
+  } else {
+    memoryStorage[SESSION_STORAGE_KEY] = value;
+  }
+}
+
+function removeRawStorage(): void {
+  if (isBrowser()) {
+    try {
+      window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+      // Ignore error
+    }
+  } else {
+    delete memoryStorage[SESSION_STORAGE_KEY];
+  }
+}
+
+function notifySubscribers(): void {
+  if (isBrowser()) {
+    window.dispatchEvent(new Event(SESSION_EVENT));
+  } else {
+    for (const listener of memoryListeners) {
+      try {
+        listener();
+      } catch {
+        // Ignore subscriber error
+      }
+    }
+  }
+}
+
 /**
- * Retrieve all modified tours stored in the current browser session.
+ * Retrieve all modified tours stored in the current session.
  */
 export function getSessionTours(): Record<string, Tour> | null {
-  if (!isBrowser()) return null;
   try {
-    const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    const raw = getRawStorage();
     if (!raw) return null;
     return JSON.parse(raw) as Record<string, Tour>;
   } catch {
@@ -33,7 +87,7 @@ export function getSessionTours(): Record<string, Tour> | null {
 }
 
 /**
- * Retrieve a specific tour by ID from the browser session, if edited.
+ * Retrieve a specific tour by ID from the session, if edited.
  */
 export function getSessionTour(tourId: string): Tour | null {
   const all = getSessionTours();
@@ -42,20 +96,19 @@ export function getSessionTour(tourId: string): Tour | null {
 }
 
 /**
- * Save an updated tour to the browser session.
+ * Save an updated tour to session storage.
  */
 export function saveSessionTour(updatedTour: Tour): void {
-  if (!isBrowser()) return;
   try {
     const current = getSessionTours() ?? {};
     current[updatedTour.id] = {
       ...updatedTour,
       lastUpdated: new Date().toISOString(),
     };
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(current));
-    window.dispatchEvent(new Event(SESSION_EVENT));
+    setRawStorage(JSON.stringify(current));
+    notifySubscribers();
   } catch {
-    // Session storage failure (e.g. quota or private browsing mode) handled gracefully
+    // Graceful fallback
   }
 }
 
@@ -63,13 +116,12 @@ export function saveSessionTour(updatedTour: Tour): void {
  * Clear a specific tour edit, reverting it to baseline mock data.
  */
 export function clearSessionTour(tourId: string): void {
-  if (!isBrowser()) return;
   try {
     const current = getSessionTours();
     if (!current) return;
     delete current[tourId];
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(current));
-    window.dispatchEvent(new Event(SESSION_EVENT));
+    setRawStorage(JSON.stringify(current));
+    notifySubscribers();
   } catch {
     // Ignore error
   }
@@ -79,10 +131,9 @@ export function clearSessionTour(tourId: string): void {
  * Clear all session edits across the entire application.
  */
 export function clearAllSessionTours(): void {
-  if (!isBrowser()) return;
   try {
-    window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
-    window.dispatchEvent(new Event(SESSION_EVENT));
+    removeRawStorage();
+    notifySubscribers();
   } catch {
     // Ignore error
   }
@@ -92,12 +143,17 @@ export function clearAllSessionTours(): void {
  * React 18/19 useSyncExternalStore subscription for external session store.
  */
 export function subscribeSessionStore(callback: () => void): () => void {
-  if (!isBrowser()) return () => {};
-  window.addEventListener(SESSION_EVENT, callback);
-  window.addEventListener("storage", callback);
+  if (isBrowser()) {
+    window.addEventListener(SESSION_EVENT, callback);
+    window.addEventListener("storage", callback);
+    return () => {
+      window.removeEventListener(SESSION_EVENT, callback);
+      window.removeEventListener("storage", callback);
+    };
+  }
+  memoryListeners.add(callback);
   return () => {
-    window.removeEventListener(SESSION_EVENT, callback);
-    window.removeEventListener("storage", callback);
+    memoryListeners.delete(callback);
   };
 }
 
@@ -105,16 +161,12 @@ export function subscribeSessionStore(callback: () => void): () => void {
  * Returns raw string snapshot from session storage.
  */
 export function getSessionSnapshot(): string {
-  if (!isBrowser()) return "";
-  try {
-    return window.sessionStorage.getItem(SESSION_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
+  return getRawStorage() || "";
 }
 
 /**
  * Server snapshot for SSR hydration safety.
+ * Always returns empty string so server and client initial render match identically.
  */
 export function getServerSnapshot(): string {
   return "";
