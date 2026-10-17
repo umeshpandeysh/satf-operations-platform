@@ -18,10 +18,17 @@ export { mergeSessionTours } from "./operations";
 
 export const SESSION_STORAGE_KEY = "satf_prototype_tours_session_v1";
 export const SESSION_EVENT = "satf-session-store-update";
+export const SESSION_READ_ERROR_PREFIX = "__SATF_STORAGE_READ_ERROR__:";
 
 export interface StorageOperationResult {
   success: boolean;
   error?: string;
+}
+
+export interface SessionStoreReadState {
+  status: "empty" | "ready" | "error";
+  tours: Record<string, Tour> | null;
+  error: string | null;
 }
 
 export interface StorageDriver {
@@ -234,11 +241,16 @@ export function getSessionToursResult(): ParsedStorageResult {
 
 /**
  * Retrieve all modified tours stored in the current session.
- * Returns null if no session edits exist or if storage cannot be read.
+ * Throws an Error if storage cannot be reliably read or is corrupted,
+ * ensuring callers never confuse a read failure with an empty session (null).
+ * Returns null ONLY when storage is genuinely empty.
  */
 export function getSessionTours(): Record<string, Tour> | null {
   const result = getSessionToursResult();
-  return result.success ? result.tours : null;
+  if (!result.success) {
+    throw new Error(result.error);
+  }
+  return result.tours;
 }
 
 /**
@@ -257,10 +269,15 @@ export function getSessionTourResult(tourId: string): SingleTourReadResult {
 
 /**
  * Retrieve a specific tour by ID from the session, if edited.
+ * Throws an Error if storage cannot be reliably read or is corrupted.
+ * Returns null ONLY when storage is empty or the tour has no session edits.
  */
 export function getSessionTour(tourId: string): Tour | null {
   const result = getSessionTourResult(tourId);
-  return result.success ? result.tour : null;
+  if (!result.success) {
+    throw new Error(result.error);
+  }
+  return result.tour;
 }
 
 /**
@@ -383,10 +400,20 @@ export function subscribeSessionStore(callback: () => void): () => void {
 }
 
 /**
- * Returns raw string snapshot from session storage.
+ * Returns raw string snapshot from session storage for React useSyncExternalStore.
+ * If storage read fails or is corrupted, returns a stable prefixed error string
+ * so React consumers detect read failures without throwing or causing infinite loops.
  */
 export function getSessionSnapshot(): string {
-  return getRawStorage() || "";
+  const readResult = getSessionToursResult();
+  if (!readResult.success) {
+    return `${SESSION_READ_ERROR_PREFIX}${readResult.error}`;
+  }
+  if (!readResult.tours) {
+    return "";
+  }
+  const rawRes = getRawStorageResult();
+  return rawRes.success && rawRes.raw ? rawRes.raw : "";
 }
 
 /**
@@ -395,4 +422,44 @@ export function getSessionSnapshot(): string {
  */
 export function getServerSnapshot(): string {
   return "";
+}
+
+/**
+ * Parses raw snapshot returned by getSessionSnapshot() into a structured, type-safe state.
+ * Enables UI consumers (Dashboard, ToursView, TourDetailClient) to cleanly distinguish
+ * between genuinely empty storage, active session edits, and storage read failures.
+ */
+export function parseSessionSnapshot(snapshot: string): SessionStoreReadState {
+  if (!snapshot) {
+    return { status: "empty", tours: null, error: null };
+  }
+  if (snapshot.startsWith(SESSION_READ_ERROR_PREFIX)) {
+    return {
+      status: "error",
+      tours: null,
+      error: snapshot.slice(SESSION_READ_ERROR_PREFIX.length),
+    };
+  }
+  try {
+    const parsed = JSON.parse(snapshot);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {
+        status: "error",
+        tours: null,
+        error: "Corrupted session data: stored payload is not a valid tour dictionary.",
+      };
+    }
+    return {
+      status: "ready",
+      tours: parsed as Record<string, Tour>,
+      error: null,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "JSON syntax error";
+    return {
+      status: "error",
+      tours: null,
+      error: `Corrupted session data: failed to parse JSON (${msg}).`,
+    };
+  }
 }

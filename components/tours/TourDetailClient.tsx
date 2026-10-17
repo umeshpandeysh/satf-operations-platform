@@ -38,6 +38,7 @@ import {
   subscribeSessionStore,
   getSessionSnapshot,
   getServerSnapshot,
+  parseSessionSnapshot,
   type StorageOperationResult,
 } from "@/lib/session-store";
 import { EditTourModal } from "./EditTourModal";
@@ -57,15 +58,14 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
     getServerSnapshot
   );
 
+  const sessionState = useMemo(() => {
+    return parseSessionSnapshot(sessionRaw);
+  }, [sessionRaw]);
+
   const sessionTour = useMemo(() => {
-    if (!sessionRaw) return null;
-    try {
-      const all = JSON.parse(sessionRaw) as Record<string, Tour>;
-      return all[initialTour.id] ?? null;
-    } catch {
-      return null;
-    }
-  }, [sessionRaw, initialTour.id]);
+    if (sessionState.status !== "ready" || !sessionState.tours) return null;
+    return sessionState.tours[initialTour.id] ?? null;
+  }, [sessionState, initialTour.id]);
 
   const tour = sessionTour ?? initialTour;
   const hasSessionModifications = Boolean(sessionTour);
@@ -122,6 +122,18 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
           </button>
         )}
       </div>
+
+      {sessionState.status === "error" && (
+        <div
+          role="alert"
+          className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-2.5 text-xs font-medium text-amber-900 flex items-center gap-2 transition-all"
+        >
+          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+          <span>
+            <strong>Session Storage Read Failure:</strong> Could not check for saved modifications ({sessionState.error}). Displaying baseline record.
+          </span>
+        </div>
+      )}
 
       {feedbackMessage && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-xs font-medium text-emerald-800 flex items-center gap-2 transition-all">

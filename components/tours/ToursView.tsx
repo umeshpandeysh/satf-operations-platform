@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Search, SlidersHorizontal, Globe, ChevronRight } from "lucide-react";
+import { Search, SlidersHorizontal, Globe, ChevronRight, AlertTriangle } from "lucide-react";
 import {
   PageContainer,
   Card,
@@ -16,6 +16,7 @@ import {
   getSessionSnapshot,
   getServerSnapshot,
   mergeSessionTours,
+  parseSessionSnapshot,
 } from "@/lib/session-store";
 import {
   formatDate,
@@ -44,14 +45,11 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
     getServerSnapshot
   );
 
-  const sessionTours = useMemo(() => {
-    if (!sessionRaw) return null;
-    try {
-      return JSON.parse(sessionRaw) as Record<string, Tour>;
-    } catch {
-      return null;
-    }
+  const sessionState = useMemo(() => {
+    return parseSessionSnapshot(sessionRaw);
   }, [sessionRaw]);
+
+  const sessionTours = sessionState.tours;
 
   const tours = useMemo(() => {
     return mergeSessionTours(initialTours, sessionTours);
@@ -76,6 +74,18 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
 
   return (
     <PageContainer>
+      {sessionState.status === "error" && (
+        <div
+          role="alert"
+          className="mb-4 bg-amber-50 border border-amber-300 rounded-lg px-4 py-2.5 text-xs font-medium text-amber-900 flex items-center gap-2"
+        >
+          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+          <span>
+            <strong>Session Storage Read Failure:</strong> Could not retrieve saved tour modifications ({sessionState.error}). Showing baseline mock tours.
+          </span>
+        </div>
+      )}
+
       {/* Filter toolbar */}
       <div className="flex flex-col sm:flex-row gap-3">
         {/* Search */}

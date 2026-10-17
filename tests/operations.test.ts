@@ -41,6 +41,9 @@ import {
   StorageOperationResult,
   StorageDriver,
   getSessionToursResult,
+  getSessionSnapshot,
+  parseSessionSnapshot,
+  SESSION_READ_ERROR_PREFIX,
 } from "../lib/session-store";
 
 import { APPROVED_VEHICLE_TYPES, Tour } from "../lib/types";
@@ -951,6 +954,151 @@ describe("13. Session storage failure handling, subscriber notifications, and dr
     assert.strictEqual(draftState.operationalNotes, "Operator draft notes awaiting persist");
 
     resetSessionStoreForTesting();
+  });
+
+  test("getSessionTours() and getSessionTour() throw on storage read failure, preventing confusion with empty data (null)", () => {
+    resetSessionStoreForTesting();
+
+    try {
+      // 1. Genuinely empty store returns null
+      assert.strictEqual(getSessionTours(), null);
+      assert.strictEqual(getSessionTour("tour-003"), null);
+
+      // 2. Unreadable store throws Error instead of returning null
+      const brokenDriver: StorageDriver = {
+        getItem: () => {
+          throw new Error("Simulated storage read permission denied");
+        },
+        setItem: () => {},
+        removeItem: () => {},
+      };
+      setStorageDriverForTesting(brokenDriver);
+
+      assert.throws(
+        () => getSessionTours(),
+        /Simulated storage read permission denied/,
+        "getSessionTours must throw on read failure rather than returning null"
+      );
+
+      assert.throws(
+        () => getSessionTour("tour-003"),
+        /Simulated storage read permission denied/,
+        "getSessionTour must throw on read failure rather than returning null"
+      );
+    } finally {
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("getSessionSnapshot() returns error-prefixed string on read failure and empty string when genuinely empty", () => {
+    resetSessionStoreForTesting();
+
+    try {
+      // 1. Empty storage returns empty string
+      assert.strictEqual(getSessionSnapshot(), "");
+
+      // 2. Storage read error returns error-prefixed string
+      const brokenDriver: StorageDriver = {
+        getItem: () => {
+          throw new Error("Quota or hardware read fault");
+        },
+        setItem: () => {},
+        removeItem: () => {},
+      };
+      setStorageDriverForTesting(brokenDriver);
+
+      const errorSnapshot = getSessionSnapshot();
+      assert.ok(errorSnapshot.startsWith(SESSION_READ_ERROR_PREFIX));
+      assert.ok(errorSnapshot.includes("Quota or hardware read fault"));
+
+      // 3. Corrupted JSON payload also produces error-prefixed string
+      const corruptDriver: StorageDriver = {
+        getItem: () => "{ unclosed json payload",
+        setItem: () => {},
+        removeItem: () => {},
+      };
+      setStorageDriverForTesting(corruptDriver);
+
+      const corruptSnapshot = getSessionSnapshot();
+      assert.ok(corruptSnapshot.startsWith(SESSION_READ_ERROR_PREFIX));
+      assert.ok(corruptSnapshot.includes("Corrupted session data"));
+    } finally {
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("parseSessionSnapshot() accurately distinguishes empty, ready, and error states without silent fallback", () => {
+    // A: Genuinely empty
+    const emptyState = parseSessionSnapshot("");
+    assert.strictEqual(emptyState.status, "empty");
+    assert.strictEqual(emptyState.tours, null);
+    assert.strictEqual(emptyState.error, null);
+
+    // B: Valid session data
+    const validJson = JSON.stringify({ "tour-003": baseTour });
+    const readyState = parseSessionSnapshot(validJson);
+    assert.strictEqual(readyState.status, "ready");
+    assert.ok(readyState.tours && readyState.tours["tour-003"]);
+    assert.strictEqual(readyState.error, null);
+
+    // C: Prefixed storage read error
+    const errState = parseSessionSnapshot(`${SESSION_READ_ERROR_PREFIX}Access denied by browser`);
+    assert.strictEqual(errState.status, "error");
+    assert.strictEqual(errState.tours, null);
+    assert.strictEqual(errState.error, "Access denied by browser");
+
+    // D: Corrupted JSON syntax
+    const badJsonState = parseSessionSnapshot("{ invalid json");
+    assert.strictEqual(badJsonState.status, "error");
+    assert.strictEqual(badJsonState.tours, null);
+    assert.ok(badJsonState.error && badJsonState.error.includes("Corrupted session data"));
+
+    // E: Non-object JSON
+    const numberState = parseSessionSnapshot("12345");
+    assert.strictEqual(numberState.status, "error");
+    assert.strictEqual(numberState.tours, null);
+    assert.ok(numberState.error && numberState.error.includes("Corrupted session data"));
+  });
+
+  test("UI data layer consumer simulation (Node test runner without headless browser): read failure exposes error state and prevents mistaking unreadable storage for empty store", () => {
+    resetSessionStoreForTesting();
+
+    try {
+      // Contract simulation: Validates that consumers (DashboardView, ToursView, TourDetailClient)
+      // do NOT mistake a failed read for an empty store and do NOT present baseline without alert.
+      const brokenDriver: StorageDriver = {
+        getItem: () => {
+          throw new Error("Sandbox filesystem error");
+        },
+        setItem: () => {},
+        removeItem: () => {},
+      };
+      setStorageDriverForTesting(brokenDriver);
+
+      // 1. Snapshot taken by useSyncExternalStore
+      const snapshot = getSessionSnapshot();
+
+      // 2. Consumer parses snapshot
+      const consumerState = parseSessionSnapshot(snapshot);
+
+      // 3. Consumer state guarantees:
+      assert.strictEqual(
+        consumerState.status,
+        "error",
+        "Consumer must be informed of error status, not empty status"
+      );
+      assert.strictEqual(consumerState.tours, null, "Corrupt or unreadable tours must not be merged");
+      assert.ok(
+        consumerState.error && consumerState.error.includes("Sandbox filesystem error"),
+        "Error message must be passed to UI banner"
+      );
+
+      // 4. Verify merge behavior with null tours produces clean fallback without corrupting state
+      const fallbackTours = mergeSessionTours([baseTour], consumerState.tours);
+      assert.strictEqual(fallbackTours[0].id, baseTour.id);
+    } finally {
+      resetSessionStoreForTesting();
+    }
   });
 });
 

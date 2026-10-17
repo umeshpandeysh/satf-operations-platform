@@ -32,6 +32,7 @@ import {
   getServerSnapshot,
   mergeSessionTours,
   clearAllSessionTours,
+  parseSessionSnapshot,
 } from "@/lib/session-store";
 import {
   formatDate,
@@ -53,14 +54,11 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
     getServerSnapshot
   );
 
-  const sessionTours = useMemo(() => {
-    if (!sessionRaw) return null;
-    try {
-      return JSON.parse(sessionRaw) as Record<string, Tour>;
-    } catch {
-      return null;
-    }
+  const sessionState = useMemo(() => {
+    return parseSessionSnapshot(sessionRaw);
   }, [sessionRaw]);
+
+  const sessionTours = sessionState.tours;
 
   const tours = useMemo(() => {
     return mergeSessionTours(initialTours, sessionTours);
@@ -78,7 +76,11 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
     return getUpcomingArrivalsFromTours(tours, 10, today);
   }, [tours, today]);
 
-  const hasSessionEdits = Boolean(sessionTours && Object.keys(sessionTours).length > 0);
+  const hasSessionEdits = Boolean(
+    sessionState.status === "ready" &&
+    sessionTours &&
+    Object.keys(sessionTours).length > 0
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   function handleResetSession() {
@@ -117,6 +119,18 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
           </div>
         )}
       </div>
+
+      {sessionState.status === "error" && (
+        <div
+          role="alert"
+          className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-2.5 text-xs font-medium text-amber-900 flex items-center gap-2"
+        >
+          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+          <span>
+            <strong>Session Storage Read Failure:</strong> Could not load saved session modifications ({sessionState.error}). Showing baseline data until storage access is restored.
+          </span>
+        </div>
+      )}
 
       {errorMessage && (
         <div
