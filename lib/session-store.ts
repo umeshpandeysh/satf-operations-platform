@@ -206,23 +206,14 @@ function notifySubscribers(): void {
 
 // ─── Authoritative Public Session Store API ──────────────────────────────────
 
-/**
- * Retrieve all modified tours stored in the current session with explicit error reporting.
- * Distinguishes between an uninitialized key (tours: null) and an unreadable/corrupted store.
- */
-export function getSessionToursResult(): ParsedStorageResult {
-  const readRes = getRawStorageResult();
-  if (!readRes.success) {
-    return { success: false, error: readRes.error };
-  }
-
+function parseRawPayload(raw: string | null): ParsedStorageResult {
   // Genuinely empty storage key (not edited in this session)
-  if (readRes.raw === null || readRes.raw.trim() === "") {
+  if (raw === null || raw.trim() === "") {
     return { success: true, tours: null };
   }
 
   try {
-    const parsed = JSON.parse(readRes.raw);
+    const parsed = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       return {
         success: false,
@@ -237,6 +228,18 @@ export function getSessionToursResult(): ParsedStorageResult {
       error: `Corrupted session data: failed to parse stored JSON (${msg}).`,
     };
   }
+}
+
+/**
+ * Retrieve all modified tours stored in the current session with explicit error reporting.
+ * Distinguishes between an uninitialized key (tours: null) and an unreadable/corrupted store.
+ */
+export function getSessionToursResult(): ParsedStorageResult {
+  const readRes = getRawStorageResult();
+  if (!readRes.success) {
+    return { success: false, error: readRes.error };
+  }
+  return parseRawPayload(readRes.raw);
 }
 
 /**
@@ -401,19 +404,27 @@ export function subscribeSessionStore(callback: () => void): () => void {
 
 /**
  * Returns raw string snapshot from session storage for React useSyncExternalStore.
+ * Performs strictly ONE read operation to avoid double-read race conditions.
  * If storage read fails or is corrupted, returns a stable prefixed error string
  * so React consumers detect read failures without throwing or causing infinite loops.
+ * Returns empty string "" ONLY when storage is genuinely empty.
  */
 export function getSessionSnapshot(): string {
-  const readResult = getSessionToursResult();
-  if (!readResult.success) {
-    return `${SESSION_READ_ERROR_PREFIX}${readResult.error}`;
+  const readRes = getRawStorageResult();
+  if (!readRes.success) {
+    return `${SESSION_READ_ERROR_PREFIX}${readRes.error}`;
   }
-  if (!readResult.tours) {
+
+  const parsedRes = parseRawPayload(readRes.raw);
+  if (!parsedRes.success) {
+    return `${SESSION_READ_ERROR_PREFIX}${parsedRes.error}`;
+  }
+
+  if (!parsedRes.tours) {
     return "";
   }
-  const rawRes = getRawStorageResult();
-  return rawRes.success && rawRes.raw ? rawRes.raw : "";
+
+  return readRes.raw!;
 }
 
 /**

@@ -1100,5 +1100,53 @@ describe("13. Session storage failure handling, subscriber notifications, and dr
       resetSessionStoreForTesting();
     }
   });
+
+  test("getSessionSnapshot() reads storage only once per call, eliminating double-read race condition where 2nd read fails", () => {
+    resetSessionStoreForTesting();
+
+    try {
+      let readCount = 0;
+      const validPayload = JSON.stringify({ "tour-003": baseTour });
+
+      // Driver that succeeds on its first read but throws on its second read
+      const flakingDriver: StorageDriver = {
+        getItem: () => {
+          readCount++;
+          if (readCount === 1) {
+            return validPayload;
+          }
+          throw new Error("Flaky storage second read failure");
+        },
+        setItem: () => {},
+        removeItem: () => {},
+      };
+
+      setStorageDriverForTesting(flakingDriver);
+
+      // In the previous buggy implementation, getSessionSnapshot called getSessionToursResult()
+      // (1st read) and then called getRawStorageResult() again (2nd read). Because the 2nd read
+      // threw an error, it returned "", incorrectly representing the store as empty.
+      // The corrected implementation must perform strictly ONE read and return the valid snapshot.
+      const snapshot = getSessionSnapshot();
+
+      assert.strictEqual(
+        readCount,
+        1,
+        "getSessionSnapshot must read storage exactly once per call"
+      );
+
+      assert.strictEqual(
+        snapshot,
+        validPayload,
+        "Must return valid payload from single read, never falling back to empty string"
+      );
+
+      const parsedState = parseSessionSnapshot(snapshot);
+      assert.strictEqual(parsedState.status, "ready");
+      assert.ok(parsedState.tours && parsedState.tours["tour-003"]);
+    } finally {
+      resetSessionStoreForTesting();
+    }
+  });
 });
 
