@@ -38,6 +38,7 @@ import {
   subscribeSessionStore,
   getSessionSnapshot,
   getServerSnapshot,
+  type StorageOperationResult,
 } from "@/lib/session-store";
 import { EditTourModal } from "./EditTourModal";
 
@@ -48,6 +49,7 @@ interface TourDetailClientProps {
 export function TourDetailClient({ initialTour }: TourDetailClientProps) {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const sessionRaw = useSyncExternalStore(
     subscribeSessionStore,
@@ -68,15 +70,31 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
   const tour = sessionTour ?? initialTour;
   const hasSessionModifications = Boolean(sessionTour);
 
-  function handleSave(updatedTour: Tour) {
-    saveSessionTour(updatedTour);
+  function handleSave(updatedTour: Tour): StorageOperationResult {
+    setErrorMessage(null);
+    const result = saveSessionTour(updatedTour);
+    if (!result.success) {
+      // Do not close modal, do not show success message
+      return result;
+    }
+
+    // Success shown only after persistence succeeds
     setIsEditOpen(false);
     setFeedbackMessage("Operations record updated for this browser session.");
     setTimeout(() => setFeedbackMessage(null), 4000);
+    return { success: true };
   }
 
   function handleReset() {
-    clearSessionTour(initialTour.id);
+    setErrorMessage(null);
+    const result = clearSessionTour(initialTour.id);
+    if (!result.success) {
+      setErrorMessage(
+        result.error || "Failed to reset tour record in browser session storage."
+      );
+      setTimeout(() => setErrorMessage(null), 5000);
+      return;
+    }
     setFeedbackMessage("Tour reverted to initial baseline mock data.");
     setTimeout(() => setFeedbackMessage(null), 4000);
   }
@@ -109,6 +127,15 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-xs font-medium text-emerald-800 flex items-center gap-2 transition-all">
           <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
           {feedbackMessage}
+        </div>
+      )}
+      {errorMessage && (
+        <div
+          role="alert"
+          className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs font-medium text-red-800 flex items-center gap-2 transition-all"
+        >
+          <AlertCircle size={16} className="text-red-600 shrink-0" />
+          <span>{errorMessage}</span>
         </div>
       )}
 

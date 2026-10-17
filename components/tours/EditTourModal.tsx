@@ -10,12 +10,13 @@ import {
 } from "lucide-react";
 import type { Tour, TourStatus, AssignmentStatus, OperationalIssue, VehicleType } from "@/lib/types";
 import { validateTourForm, applyIssueUpdate } from "@/lib/operations";
+import type { StorageOperationResult } from "@/lib/session-store";
 
 interface EditTourModalProps {
   tour: Tour;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (updatedTour: Tour) => void;
+  onSave: (updatedTour: Tour) => StorageOperationResult | Promise<StorageOperationResult>;
 }
 
 const TOUR_STATUS_OPTIONS: Array<{ value: TourStatus; label: string }> = [
@@ -86,8 +87,10 @@ export function EditTourModal({
     tour.issues?.map((iss) => ({ ...iss })) ?? []
   );
 
-  // Inline Validation Errors
+  // Inline Validation & Storage Errors
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -160,8 +163,9 @@ export function EditTourModal({
     );
   }
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    setStorageError(null);
 
     // Inline validation using shared production rules
     const validation = validateTourForm({
@@ -233,7 +237,24 @@ export function EditTourModal({
       lastUpdated: new Date().toISOString(),
     };
 
-    onSave(updatedTour);
+    setIsSaving(true);
+    try {
+      const result = await onSave(updatedTour);
+      if (!result.success) {
+        // Keep modal open, preserve draft, and display clear inline error
+        setStorageError(
+          result.error ||
+            "Failed to save changes to session storage. Your draft has been kept in this dialog."
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unexpected storage failure";
+      setStorageError(
+        `Failed to save changes to session storage: ${msg}. Your draft has been kept in this dialog.`
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -287,6 +308,23 @@ export function EditTourModal({
 
         {/* Scrollable Form Body */}
         <form id="edit-tour-form" onSubmit={handleSave} className="overflow-y-auto p-6 space-y-6">
+          {/* Storage Save Error Banner */}
+          {storageError && (
+            <div
+              role="alert"
+              className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800 flex items-start gap-2.5"
+            >
+              <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-semibold text-red-900">Changes Not Persisted</p>
+                <p className="mt-0.5 text-red-700">{storageError}</p>
+                <p className="mt-1 text-[11px] text-red-600">
+                  Your draft edits are preserved in this dialog. Review your details and try saving again, or cancel to discard.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Section 1: Tour Status (Explicit Choice) */}
           <div className="space-y-1.5">
             <label htmlFor="tour-status" className="block text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -635,15 +673,17 @@ export function EditTourModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              disabled={isSaving}
+              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              disabled={isSaving}
+              className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
             >
-              Save Operations Changes
+              {isSaving ? "Saving…" : "Save Operations Changes"}
             </button>
           </div>
         </form>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore, useState } from "react";
 import Link from "next/link";
 import {
   Plane,
@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   RotateCcw,
   Info,
+  AlertCircle,
 } from "lucide-react";
 import {
   MetricCard,
@@ -78,9 +79,15 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
   }, [tours, today]);
 
   const hasSessionEdits = Boolean(sessionTours && Object.keys(sessionTours).length > 0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   function handleResetSession() {
-    clearAllSessionTours();
+    setErrorMessage(null);
+    const result = clearAllSessionTours();
+    if (!result.success) {
+      setErrorMessage(result.error || "Failed to reset session edits in browser storage.");
+      setTimeout(() => setErrorMessage(null), 5000);
+    }
   }
 
   return (
@@ -110,6 +117,16 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
           </div>
         )}
       </div>
+
+      {errorMessage && (
+        <div
+          role="alert"
+          className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs font-medium text-red-800 flex items-center gap-2"
+        >
+          <AlertCircle size={16} className="text-red-600 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
 
       {/* Metrics grid */}
       <section aria-labelledby="metrics-heading">

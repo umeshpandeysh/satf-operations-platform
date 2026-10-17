@@ -31,11 +31,17 @@ import {
 import {
   saveSessionTour,
   getSessionTour,
+  getSessionTours,
   clearSessionTour,
   clearAllSessionTours,
+  subscribeSessionStore,
+  simulateStorageFailureForTesting,
+  resetSessionStoreForTesting,
+  setStorageDriverForTesting,
+  StorageOperationResult,
 } from "../lib/session-store";
 
-import { APPROVED_VEHICLE_TYPES } from "../lib/types";
+import { APPROVED_VEHICLE_TYPES, Tour } from "../lib/types";
 
 describe("1. Asia/Kolkata reference date calculation", () => {
   test("getIndiaTodayISO() returns valid YYYY-MM-DD format", () => {
@@ -608,6 +614,205 @@ describe("12. Shared session store and dashboard-derived reactivity", () => {
       reactiveArrivals.some((tour) => tour.id === "tour-003"),
       "Upcoming arrivals list dynamically reflects session-updated tour status"
     );
+  });
+});
+
+describe("13. Session storage failure handling, subscriber notifications, and draft preservation contract", () => {
+  const refDate = getIndiaTodayISO();
+  const baseTour = getTourById("tour-003", refDate)!;
+
+  test("saveSessionTour() returns { success: true } and triggers subscriber notification on success", () => {
+    resetSessionStoreForTesting();
+    let notificationCount = 0;
+    const unsubscribe = subscribeSessionStore(() => {
+      notificationCount++;
+    });
+
+    try {
+      const updatedTour: Tour = {
+        ...baseTour,
+        status: "active",
+        operationalNotes: "Verified Ramesh Kumar driver assignment",
+      };
+
+      const result = saveSessionTour(updatedTour);
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.error, undefined);
+      assert.strictEqual(notificationCount, 1, "Subscriber must be notified on successful write");
+
+      const retrieved = getSessionTour(baseTour.id);
+      assert.strictEqual(retrieved?.operationalNotes, "Verified Ramesh Kumar driver assignment");
+    } finally {
+      unsubscribe();
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("saveSessionTour() returns honest error result when storage write fails (e.g. quota exceeded)", () => {
+    resetSessionStoreForTesting();
+    let notificationCount = 0;
+    const unsubscribe = subscribeSessionStore(() => {
+      notificationCount++;
+    });
+
+    try {
+      simulateStorageFailureForTesting("QuotaExceededError: DomException: quota exceeded");
+
+      const updatedTour: Tour = {
+        ...baseTour,
+        status: "active",
+        operationalNotes: "Notes on write failure",
+      };
+
+      const result = saveSessionTour(updatedTour);
+      assert.strictEqual(result.success, false, "Must return failure when storage write fails");
+      assert.ok(result.error && result.error.includes("quota exceeded"), "Error message must describe failure");
+      assert.strictEqual(notificationCount, 0, "Subscribers must NOT be notified if write fails");
+    } finally {
+      unsubscribe();
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("failed save does not corrupt or overwrite previously saved session data", () => {
+    resetSessionStoreForTesting();
+
+    try {
+      // 1. Initial successful save
+      const initialTour: Tour = {
+        ...baseTour,
+        operationalNotes: "Initial verified operational note A",
+      };
+      const initialSave = saveSessionTour(initialTour);
+      assert.strictEqual(initialSave.success, true);
+
+      // Verify stored
+      assert.strictEqual(getSessionTour(baseTour.id)?.operationalNotes, "Initial verified operational note A");
+
+      // 2. Next save fails due to storage failure
+      simulateStorageFailureForTesting("DiskIOError: Simulated write failure");
+
+      const brokenTour: Tour = {
+        ...baseTour,
+        operationalNotes: "Corrupted note B that should fail",
+      };
+      const failedSave = saveSessionTour(brokenTour);
+      assert.strictEqual(failedSave.success, false);
+
+      // 3. Verify original stored data remains untouched
+      simulateStorageFailureForTesting(null); // allow reading
+      const preserved = getSessionTour(baseTour.id);
+      assert.strictEqual(
+        preserved?.operationalNotes,
+        "Initial verified operational note A",
+        "Previously saved data must remain intact when subsequent save fails"
+      );
+    } finally {
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("clearSessionTour() and clearAllSessionTours() return detectable error when storage fails", () => {
+    resetSessionStoreForTesting();
+
+    try {
+      // First save an item successfully so that clearSessionTour has a record to remove
+      const saveRes = saveSessionTour({ ...baseTour, operationalNotes: "To be cleared" });
+      assert.strictEqual(saveRes.success, true);
+
+      simulateStorageFailureForTesting("SecurityError: Access is denied");
+
+      const singleClearResult = clearSessionTour(baseTour.id);
+      assert.strictEqual(singleClearResult.success, false);
+      assert.ok(singleClearResult.error?.includes("Access is denied"));
+
+      const allClearResult = clearAllSessionTours();
+      assert.strictEqual(allClearResult.success, false);
+      assert.ok(allClearResult.error?.includes("Access is denied"));
+    } finally {
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("clearSessionTour() and clearAllSessionTours() return { success: true } and notify subscribers on success", () => {
+    resetSessionStoreForTesting();
+    let notificationCount = 0;
+    const unsubscribe = subscribeSessionStore(() => {
+      notificationCount++;
+    });
+
+    try {
+      saveSessionTour({ ...baseTour, operationalNotes: "Clear test note 1" });
+      assert.strictEqual(notificationCount, 1);
+
+      const clearSingleResult = clearSessionTour(baseTour.id);
+      assert.strictEqual(clearSingleResult.success, true);
+      assert.strictEqual(notificationCount, 2, "Subscriber notified on single clear");
+
+      saveSessionTour({ ...baseTour, operationalNotes: "Clear test note 2" });
+      assert.strictEqual(notificationCount, 3);
+
+      const clearAllResult = clearAllSessionTours();
+      assert.strictEqual(clearAllResult.success, true);
+      assert.strictEqual(notificationCount, 4, "Subscriber notified on clear all");
+      assert.strictEqual(getSessionTours(), null);
+    } finally {
+      unsubscribe();
+      resetSessionStoreForTesting();
+    }
+  });
+
+  test("UI draft preservation contract: failed save keeps draft intact and does not report success", () => {
+    resetSessionStoreForTesting();
+
+    // Simulate modal edit controller logic:
+    // User edits draft fields
+    const draftState = {
+      driverName: "Operator Draft Driver",
+      vehicleNumber: "HR 26 DQ 9999",
+      operationalNotes: "Operator draft notes awaiting persist",
+    };
+
+    // UI state flags
+    let modalIsOpen = true;
+    let successBannerShown = false;
+    let inlineErrorMessage: string | null = null;
+
+    // Simulate storage write failure
+    simulateStorageFailureForTesting("QuotaExceededError: storage full");
+
+    const onSaveDraft = (draft: typeof draftState): StorageOperationResult => {
+      const updated: Tour = {
+        ...baseTour,
+        operationalNotes: draft.operationalNotes,
+      };
+
+      const result = saveSessionTour(updated);
+      if (!result.success) {
+        // Modal logic per EditTourModal / TourDetailClient contract:
+        // Do NOT close modal, do NOT set success banner, set inline error, preserve draftState
+        inlineErrorMessage = result.error ?? "Failed to save changes to session storage.";
+        return result;
+      }
+
+      modalIsOpen = false;
+      successBannerShown = true;
+      return result;
+    };
+
+    const saveResult = onSaveDraft(draftState);
+
+    // Verify contract expectations:
+    assert.strictEqual(saveResult.success, false);
+    assert.strictEqual(modalIsOpen, true, "Modal must remain open on save failure");
+    assert.strictEqual(successBannerShown, false, "Success banner must NOT be shown when save fails");
+    const errText = inlineErrorMessage as string | null;
+    assert.ok(errText && errText.includes("storage full"), "Inline error must be set");
+    assert.strictEqual(draftState.driverName, "Operator Draft Driver", "Draft values must be preserved intact in state");
+    assert.strictEqual(draftState.vehicleNumber, "HR 26 DQ 9999");
+    assert.strictEqual(draftState.operationalNotes, "Operator draft notes awaiting persist");
+
+    resetSessionStoreForTesting();
   });
 });
 
