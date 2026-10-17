@@ -1,13 +1,13 @@
-import { Calendar as CalendarIcon } from "lucide-react";
-import { PlaceholderPage } from "@/components/ui/Primitives";
+import { getMockTours } from "@/lib/mock-data";
+import { getIndiaTodayISO } from "@/lib/utils";
+import { CalendarView } from "@/components/calendar/CalendarView";
+
+// Ensure dynamic date generation on Asia/Kolkata reference time
+export const dynamic = "force-dynamic";
 
 export default function CalendarPage() {
-  return (
-    <PlaceholderPage
-      title="Operational Schedule & Calendar"
-      description="The calendar module will provide multi-day tour views, arrival/departure flight tracking, and guide/vehicle schedule coordination. Planned for Phase 2."
-      plannedPhase="Phase 2"
-      icon={CalendarIcon}
-    />
-  );
+  const initialTours = getMockTours();
+  const today = getIndiaTodayISO();
+
+  return <CalendarView initialTours={initialTours} referenceDate={today} />;
 }
