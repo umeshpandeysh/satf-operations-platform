@@ -20,6 +20,7 @@ import {
   CardHeader,
   CardContent,
   SectionHeader,
+  StatusBadge,
   Badge,
 } from "@/components/ui/Primitives";
 import type { Tour } from "@/lib/types";
@@ -27,8 +28,6 @@ import {
   formatDate,
   formatDateShort,
   nightsBetween,
-  TOUR_STATUS_CLASSES,
-  TOUR_STATUS_LABELS,
   ITINERARY_TYPE_LABELS,
   ASSIGNMENT_STATUS_LABELS,
 } from "@/lib/utils";
@@ -74,13 +73,11 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
     setErrorMessage(null);
     const result = saveSessionTour(updatedTour);
     if (!result.success) {
-      // Do not close modal, do not show success message
       return result;
     }
 
-    // Success shown only after persistence succeeds
     setIsEditOpen(false);
-    setFeedbackMessage("Operations record updated for this browser session.");
+    setFeedbackMessage("Operations record successfully updated for this browser session.");
     setTimeout(() => setFeedbackMessage(null), 4000);
     return { success: true };
   }
@@ -95,118 +92,205 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
       setTimeout(() => setErrorMessage(null), 5000);
       return;
     }
-    setFeedbackMessage("Tour reverted to initial baseline mock data.");
+    setFeedbackMessage("Tour record reverted to baseline mock state.");
     setTimeout(() => setFeedbackMessage(null), 4000);
   }
 
   const durationNights = nightsBetween(tour.arrivalDate, tour.departureDate);
   const openIssues = tour.issues?.filter((i) => !i.resolved) ?? [];
+  const arrivalFlight = tour.flights.find((f) => f.direction === "arrival");
+  const departureFlight = tour.flights.find((f) => f.direction === "departure");
 
   return (
     <PageContainer>
-      {/* Prototype Scope Banner */}
-      <div className="bg-amber-50/90 border border-amber-200/90 rounded-lg px-4 py-2.5 flex items-start sm:items-center justify-between gap-3 text-xs text-amber-900">
-        <div className="flex items-center gap-2">
-          <Info size={16} className="text-amber-700 shrink-0" />
-          <span>
-            <strong>Prototype demonstration session:</strong> Edits are browser-local, not shared between operational staff, and not authoritative persistence.
-          </span>
-        </div>
-        {hasSessionModifications && (
-          <button
-            type="button"
-            onClick={handleReset}
-            className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 hover:text-amber-950 underline shrink-0"
-          >
-            <RotateCcw size={12} /> Reset to Original
-          </button>
-        )}
-      </div>
-
-      {sessionState.status === "error" && (
-        <div
-          role="alert"
-          className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-2.5 text-xs font-medium text-amber-900 flex items-center gap-2 transition-all"
-        >
-          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
-          <span>
-            <strong>Session Storage Read Failure:</strong> Could not check for saved modifications ({sessionState.error}). Displaying baseline record.
-          </span>
-        </div>
-      )}
-
-      {feedbackMessage && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-xs font-medium text-emerald-800 flex items-center gap-2 transition-all">
-          <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
-          {feedbackMessage}
-        </div>
-      )}
-      {errorMessage && (
-        <div
-          role="alert"
-          className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs font-medium text-red-800 flex items-center gap-2 transition-all"
-        >
-          <AlertCircle size={16} className="text-red-600 shrink-0" />
-          <span>{errorMessage}</span>
-        </div>
-      )}
-
-      {/* Back button & Action Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
-        <div className="flex items-center gap-3">
+      {/* ── Breadcrumbs & Back Navigation ────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1 border-b border-slate-200/80">
+        <div className="flex items-center gap-2 text-xs text-slate-500">
           <Link
             href="/tours"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-sm transition-colors"
+            className="inline-flex items-center gap-1 font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-2.5 py-1 rounded-md shadow-xs transition-colors"
           >
-            <ArrowLeft size={16} />
-            Back to Tours
+            <ArrowLeft size={13} />
+            <span>Tours Roster</span>
           </Link>
-          <div className="h-4 w-px bg-slate-300 hidden sm:block" />
-          <span className="font-mono text-sm font-semibold text-slate-500">
+          <span className="text-slate-300">/</span>
+          <span className="font-mono font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
             {tour.bookingReference}
           </span>
           {hasSessionModifications && (
-            <Badge className="bg-blue-100 text-blue-800 border border-blue-200 text-[10px]">
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+              <Info size={11} />
               Session Modified
-            </Badge>
+            </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <Badge className={TOUR_STATUS_CLASSES[tour.status]}>
-            {TOUR_STATUS_LABELS[tour.status]}
-          </Badge>
+        <div className="flex items-center gap-2">
+          {hasSessionModifications && (
+            <button
+              type="button"
+              onClick={handleReset}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-md shadow-xs transition-colors"
+            >
+              <RotateCcw size={12} />
+              Reset Tour
+            </button>
+          )}
+
+          <StatusBadge status={tour.status} />
+
           <button
             type="button"
             onClick={() => setIsEditOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           >
-            <Edit3 size={14} />
+            <Edit3 size={13} />
             Update Operations
           </button>
         </div>
       </div>
 
-      {/* Source Provenance Banner */}
-      {tour.sourceProvenance && (
-        <div className="bg-slate-100 border border-slate-200/90 rounded-lg px-4 py-2 flex items-center justify-between text-xs text-slate-600">
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet size={15} className="text-slate-500 shrink-0" />
-            <span>
-              <strong>Format Context:</strong> {tour.sourceProvenance}
-            </span>
-          </div>
-          <span className="text-[11px] text-slate-400">Illustrative format sample</span>
+      {/* ── Alerts & Prototype Disclaimer ───────────────────────────────────── */}
+      {sessionState.status === "error" && (
+        <div
+          role="alert"
+          className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-2.5 text-xs font-medium text-amber-900 flex items-center gap-2 shadow-xs"
+        >
+          <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+          <span>
+            <strong>Storage Warning:</strong> Could not check session modifications ({sessionState.error}). Displaying baseline record.
+          </span>
         </div>
       )}
 
-      {/* Discrete Operational Issues Panel */}
+      {feedbackMessage && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-xs font-medium text-emerald-800 flex items-center gap-2 shadow-xs">
+          <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+          <span>{feedbackMessage}</span>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div
+          role="alert"
+          className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs font-medium text-red-800 flex items-center gap-2 shadow-xs"
+        >
+          <AlertCircle size={15} className="text-red-600 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
+      {/* ── Operational File Header Card ────────────────────────────────────── */}
+      <Card>
+        <CardContent className="p-4 sm:p-5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-xs mb-1">
+                <span className="font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                  {tour.destination}
+                </span>
+                <span className="text-slate-300">·</span>
+                <span className="font-medium text-slate-600">
+                  {durationNights} Nights / {durationNights + 1} Days
+                </span>
+                <span className="text-slate-300">·</span>
+                <span className="text-slate-500 font-mono">
+                  Party: {tour.group.nationality} ({tour.group.language})
+                </span>
+              </div>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                {tour.group.groupName}
+              </h1>
+              <p className="text-xs text-slate-500 mt-1">
+                Primary Contact: <strong className="text-slate-700">{tour.group.contactPerson || "Not specified"}</strong> · Group Ref: <span className="font-mono">{tour.bookingReference}</span>
+              </p>
+            </div>
+
+            {/* Compact Provenance / Prototype Note */}
+            <div className="p-2.5 rounded-md bg-slate-50 border border-slate-200 text-[11px] text-slate-600 lg:max-w-xs shrink-0">
+              <div className="flex items-center gap-1.5 font-semibold text-slate-800 mb-0.5">
+                <FileSpreadsheet size={13} className="text-blue-600" />
+                <span>Format Provenance Context</span>
+              </div>
+              <p className="text-[10px] text-slate-500 leading-tight">
+                {tour.sourceProvenance || "Illustrative operational format fixture"}.
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Stats Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100 text-xs">
+            <div className="p-2.5 rounded bg-slate-50/70 border border-slate-100">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Party Size
+              </span>
+              <p className="font-semibold text-slate-800 mt-0.5">
+                {tour.group.adultCount} Adults{tour.group.childCount > 0 ? `, ${tour.group.childCount} Children` : ""}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-0.5 font-mono">
+                Total: {tour.group.adultCount + tour.group.childCount} pax
+              </p>
+            </div>
+
+            <div className="p-2.5 rounded bg-slate-50/70 border border-slate-100">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Inbound Arrival
+              </span>
+              <p className="font-semibold text-slate-800 mt-0.5">
+                {formatDateShort(tour.arrivalDate)}
+              </p>
+              <p className="text-[10px] text-blue-700 mt-0.5 font-mono font-medium truncate">
+                {arrivalFlight?.flightNumber || "Transfer pending"} ({arrivalFlight?.arrivalTime || "ETA --:--"})
+              </p>
+            </div>
+
+            <div className="p-2.5 rounded bg-slate-50/70 border border-slate-100">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Outbound Departure
+              </span>
+              <p className="font-semibold text-slate-800 mt-0.5">
+                {formatDateShort(tour.departureDate)}
+              </p>
+              <p className="text-[10px] text-slate-600 mt-0.5 font-mono truncate">
+                {departureFlight?.flightNumber || "Transit"} ({departureFlight?.departureTime || "ETD --:--"})
+              </p>
+            </div>
+
+            <div className="p-2.5 rounded bg-slate-50/70 border border-slate-100">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                Assigned Guide
+              </span>
+              <p className="font-semibold text-slate-800 mt-0.5 truncate">
+                {tour.assignments.find((a) => a.role === "guide")?.name || (
+                  <span className="text-amber-700 italic">Unassigned</span>
+                )}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-0.5 font-mono truncate">
+                {tour.assignments.find((a) => a.role === "guide")?.reference || "Pending ID"}
+              </p>
+            </div>
+          </div>
+
+          {/* Operational Notes Strip */}
+          {tour.operationalNotes && (
+            <div className="mt-3 p-2.5 bg-blue-50/60 border border-blue-100 rounded-md flex items-start gap-2 text-xs text-blue-900">
+              <Info size={15} className="text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-semibold">Dispatch Note: </strong>
+                <span>{tour.operationalNotes}</span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Operational Blockers (Tracked Issues) ───────────────────────────── */}
       {tour.issues && tour.issues.length > 0 && (
-        <Card className="border-amber-200/90 bg-amber-50/30">
-          <CardHeader className="py-3 px-5 border-b border-amber-200/60 bg-amber-50/60">
-            <div className="flex items-center justify-between">
+        <Card className="border-amber-200/90 bg-amber-50/20">
+          <CardHeader className="py-2.5 px-4 bg-amber-50/60 border-b border-amber-200/60">
+            <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-2">
-                <AlertTriangle size={16} className="text-amber-600" />
+                <AlertTriangle size={15} className="text-amber-600" />
                 <h3 className="text-xs font-bold uppercase tracking-wider text-amber-950">
                   Tracked Operational Issues ({openIssues.length} open, {tour.issues.length - openIssues.length} resolved)
                 </h3>
@@ -216,35 +300,36 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
               </span>
             </div>
           </CardHeader>
-          <CardContent className="p-4 space-y-2.5">
+          <CardContent className="p-3.5 space-y-2">
             {tour.issues.map((issue) => (
               <div
                 key={issue.id}
-                className="flex items-start justify-between gap-3 p-2.5 rounded bg-white border border-slate-200 text-xs"
+                className="flex items-start justify-between gap-3 p-2.5 rounded-md bg-white border border-slate-200 text-xs shadow-xs"
               >
-                <div className="flex items-start gap-2">
+                <div className="flex items-start gap-2.5 min-w-0">
                   {issue.resolved ? (
                     <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
                   ) : (
                     <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
                   )}
-                  <div>
-                    <span className="font-semibold text-slate-800 capitalize">
-                      [{issue.category}]:{" "}
+                  <div className="min-w-0">
+                    <span className="font-semibold text-slate-800 uppercase text-[10px] tracking-wider text-slate-500 block">
+                      Category: {issue.category}
                     </span>
-                    <span className="text-slate-700">{issue.description}</span>
+                    <p className="text-slate-800 font-medium mt-0.5">{issue.description}</p>
                     {issue.resolutionNotes && (
-                      <p className="text-[11px] text-emerald-800 mt-0.5 font-medium">
-                        Action: {issue.resolutionNotes}
+                      <p className="text-[11px] text-emerald-800 mt-1 font-medium bg-emerald-50 p-1.5 rounded border border-emerald-100">
+                        Resolution Action: {issue.resolutionNotes}
                       </p>
                     )}
                   </div>
                 </div>
+
                 <Badge
                   className={
                     issue.resolved
-                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px]"
-                      : "bg-amber-50 text-amber-700 border border-amber-200 text-[10px]"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : "bg-amber-50 text-amber-700 border-amber-200"
                   }
                 >
                   {issue.resolved ? "Resolved" : "Open Blocker"}
@@ -255,129 +340,77 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
         </Card>
       )}
 
-      {/* Primary Overview Header */}
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wider mb-1">
-                <span>{tour.destination}</span>
-                <span>•</span>
-                <span>{durationNights} Nights / {durationNights + 1} Days</span>
-              </div>
-              <h1 className="text-2xl font-bold text-slate-900">
-                {tour.group.groupName}
-              </h1>
-              <p className="text-sm text-slate-500 mt-1">
-                Primary Contact: {tour.group.contactPerson || "Not specified"} ({tour.group.language})
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
-              <div>
-                <p className="text-xs text-slate-400 font-medium">Party Size</p>
-                <p className="text-sm font-semibold text-slate-800 mt-0.5">
-                  {tour.group.adultCount} Adults{tour.group.childCount > 0 ? `, ${tour.group.childCount} Children` : ""}
-                </p>
-                <p className="text-xs text-slate-500">Nationality: {tour.group.nationality}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-400 font-medium">Arrival Date</p>
-                <p className="text-sm font-semibold text-slate-800 mt-0.5">
-                  {formatDate(tour.arrivalDate)}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {tour.flights.find((f) => f.direction === "arrival")?.flightNumber || "No arrival flight"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-400 font-medium">Departure Date</p>
-                <p className="text-sm font-semibold text-slate-800 mt-0.5">
-                  {formatDate(tour.departureDate)}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {tour.flights.find((f) => f.direction === "departure")?.flightNumber || "No departure flight"}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {tour.operationalNotes && (
-            <div className="mt-6 p-3.5 bg-slate-50 border border-slate-200 rounded-lg flex items-start gap-2.5">
-              <Info size={17} className="text-blue-600 shrink-0 mt-0.5" />
-              <div className="text-xs leading-relaxed text-slate-800">
-                <span className="font-semibold text-slate-900">Internal Operations Note: </span>
-                {tour.operationalNotes}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Column: Itinerary Timeline */}
-        <div className="lg:col-span-2 space-y-6">
+      {/* ── Two-Column Operational Workspace ─────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Left Column (7 cols): Detailed Itinerary & Flights */}
+        <div className="lg:col-span-7 space-y-5">
+          {/* Operational Itinerary Timeline */}
           <Card>
-            <CardHeader>
+            <CardHeader className="bg-slate-50/50">
               <SectionHeader
                 title="Operational Itinerary"
                 description="Chronological schedule of transfers, sightseeing, and activities"
+                badge={
+                  <span className="text-[10px] font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+                    {tour.itinerary.length} Days
+                  </span>
+                }
               />
             </CardHeader>
-            <CardContent className="p-6">
-              <div className="relative border-l-2 border-slate-200 ml-4 space-y-8">
+            <CardContent className="p-4 sm:p-5">
+              <div className="relative border-l-2 border-slate-200 ml-3 space-y-6">
                 {tour.itinerary.map((item, idx) => (
                   <div key={item.id} className="relative pl-6">
-                    {/* Bullet marker */}
-                    <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-white border-2 border-blue-600 flex items-center justify-center">
-                      <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                    {/* Marker */}
+                    <div className="absolute -left-[7px] top-1 w-3.5 h-3.5 rounded-full bg-white border-2 border-blue-600 flex items-center justify-center">
+                      <div className="w-1 h-1 rounded-full bg-blue-600" />
                     </div>
 
-                    <div className="bg-slate-50 rounded-lg p-4 border border-slate-200/80">
-                      <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                    <div className="bg-slate-50/80 rounded-md p-3.5 border border-slate-200/90 shadow-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-slate-900">
                             Day {idx + 1} — {formatDateShort(item.date)}
                           </span>
                           {item.startTime && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
-                              <Clock size={12} />
+                            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium text-slate-600 bg-white px-1.5 py-0.2 rounded border border-slate-200">
+                              <Clock size={11} />
                               {item.startTime}
                             </span>
                           )}
                         </div>
-                        <Badge className="bg-slate-200 text-slate-700 text-[11px]">
+                        <Badge variant="neutral" className="text-[10px]">
                           {ITINERARY_TYPE_LABELS[item.type] || item.type}
                         </Badge>
                       </div>
 
-                      <h4 className="text-sm font-semibold text-slate-800">
+                      <h4 className="text-xs sm:text-sm font-semibold text-slate-800">
                         {item.title}
                       </h4>
 
                       {item.description && (
-                        <p className="text-xs text-slate-600 mt-1">
+                        <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                           {item.description}
                         </p>
                       )}
 
-                      <div className="flex flex-wrap items-center gap-4 mt-2.5 text-xs text-slate-500">
+                      <div className="flex flex-wrap items-center gap-4 mt-2 text-[11px] text-slate-500">
                         {item.location && (
                           <div className="flex items-center gap-1">
-                            <MapPin size={13} className="text-slate-400" />
+                            <MapPin size={12} className="text-slate-400" />
                             <span>{item.location}</span>
                           </div>
                         )}
                         {item.durationMinutes && (
                           <div className="flex items-center gap-1">
-                            <Clock size={13} className="text-slate-400" />
+                            <Clock size={12} className="text-slate-400" />
                             <span>Approx. {Math.round(item.durationMinutes / 60)} hrs</span>
                           </div>
                         )}
                       </div>
 
                       {item.notes && (
-                        <p className="mt-2 text-[11px] text-amber-700 bg-amber-50 p-2 rounded border border-amber-100">
+                        <p className="mt-2 text-[11px] text-amber-800 bg-amber-50 p-2 rounded border border-amber-100">
                           <strong>Note:</strong> {item.notes}
                         </p>
                       )}
@@ -388,50 +421,50 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
             </CardContent>
           </Card>
 
-          {/* Flights and Transfers */}
+          {/* Flights and Long-Distance Transit */}
           <Card>
-            <CardHeader>
+            <CardHeader className="bg-slate-50/50">
               <SectionHeader
-                title="Flights & Transport Legs"
+                title="Flights & Transport Bookings"
                 description="International and regional transit bookings"
               />
             </CardHeader>
-            <CardContent className="p-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <CardContent className="p-4 sm:p-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 {tour.flights.map((flight) => (
                   <div
                     key={flight.id}
-                    className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 space-y-2"
+                    className="p-3.5 rounded-md border border-slate-200 bg-slate-50/50 space-y-2 shadow-xs"
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wider text-blue-700">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
                         {flight.direction === "arrival" ? "Inbound Arrival" : "Outbound Departure"}
                       </span>
-                      <span className="text-xs font-mono font-semibold bg-white border border-slate-200 px-2 py-0.5 rounded">
+                      <span className="text-xs font-mono font-bold bg-white border border-slate-200 px-2 py-0.5 rounded">
                         {flight.flightNumber}
                       </span>
                     </div>
 
-                    <p className="text-sm font-semibold text-slate-800">
+                    <p className="text-xs sm:text-sm font-semibold text-slate-900">
                       {flight.origin} → {flight.destination}
                     </p>
 
-                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 pt-1">
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 pt-1 border-t border-slate-100">
                       <div>
-                        <span className="text-slate-400 block text-[11px]">Date</span>
+                        <span className="text-slate-400 block text-[10px]">Date</span>
                         <span className="font-medium">{formatDate(flight.date)}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[11px]">Schedule</span>
-                        <span className="font-medium">{flight.departureTime} – {flight.arrivalTime}</span>
+                        <span className="text-slate-400 block text-[10px]">Schedule</span>
+                        <span className="font-medium font-mono">{flight.departureTime} – {flight.arrivalTime}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[11px]">Airline</span>
+                        <span className="text-slate-400 block text-[10px]">Airline</span>
                         <span>{flight.airline}</span>
                       </div>
                       {flight.terminal && (
                         <div>
-                          <span className="text-slate-400 block text-[11px]">Terminal</span>
+                          <span className="text-slate-400 block text-[10px]">Terminal</span>
                           <span>{flight.terminal}</span>
                         </div>
                       )}
@@ -443,61 +476,65 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
           </Card>
         </div>
 
-        {/* Sidebar Column: Accommodations, Assignments, Special Requests */}
-        <div className="space-y-6">
-          {/* Resource Assignments */}
+        {/* Right Column (5 cols): Allocations, Hotels, Special Requests */}
+        <div className="lg:col-span-5 space-y-5">
+          {/* Operational Resource Allocations */}
           <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
+            <CardHeader className="bg-slate-50/50">
+              <div className="flex items-center justify-between w-full">
                 <SectionHeader
-                  title="Operational Assignments"
-                  description="Guide, driver, and vehicle allocations"
+                  title="Resource Allocations"
+                  description="Guide, driver, and vehicle assignments"
                 />
                 <button
                   type="button"
                   onClick={() => setIsEditOpen(true)}
-                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                  className="text-xs text-blue-600 hover:text-blue-800 font-semibold shrink-0"
                 >
                   Edit
                 </button>
               </div>
             </CardHeader>
-            <CardContent className="p-5 space-y-4">
+            <CardContent className="p-4 space-y-3">
               {tour.assignments.map((assignment) => (
                 <div
                   key={assignment.id}
-                  className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100 last:border-0 last:pb-0"
+                  className="flex items-start justify-between gap-3 p-3 rounded-md bg-slate-50/60 border border-slate-200/80"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                         {assignment.role}
-                      </p>
+                      </span>
                       {assignment.vehicleType && (
-                        <span className="text-[10px] font-semibold bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
+                        <span className="text-[10px] font-semibold bg-blue-50 text-blue-700 px-1.5 py-0.2 rounded border border-blue-200">
                           {assignment.vehicleType}
                         </span>
                       )}
                     </div>
-                    <p className="text-sm font-semibold text-slate-800 mt-0.5">
+                    <p className="text-xs sm:text-sm font-semibold text-slate-900 mt-0.5 truncate">
                       {assignment.name || (
                         <span className="text-slate-400 italic font-normal">Unassigned</span>
                       )}
                     </p>
                     {assignment.reference && (
-                      <p className="text-xs font-mono text-slate-500">{assignment.reference}</p>
+                      <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                        Ref: {assignment.reference}
+                      </p>
                     )}
                     {assignment.notes && (
-                      <p className="text-[11px] text-amber-700 mt-1">{assignment.notes}</p>
+                      <p className="text-[11px] text-amber-800 bg-amber-50 p-1.5 rounded mt-1 border border-amber-100">
+                        {assignment.notes}
+                      </p>
                     )}
                   </div>
                   <Badge
                     className={
                       assignment.status === "assigned"
-                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]"
                         : assignment.status === "pending"
-                        ? "bg-amber-50 text-amber-700 border border-amber-200"
-                        : "bg-red-50 text-red-600 border border-red-200"
+                        ? "bg-amber-50 text-amber-700 border-amber-200 text-[10px]"
+                        : "bg-red-50 text-red-700 border-red-200 text-[10px]"
                     }
                   >
                     {ASSIGNMENT_STATUS_LABELS[assignment.status]}
@@ -507,41 +544,43 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
             </CardContent>
           </Card>
 
-          {/* Hotel Stays */}
+          {/* Hotel Accommodations */}
           <Card>
-            <CardHeader>
+            <CardHeader className="bg-slate-50/50">
               <SectionHeader
                 title="Hotel Accommodations"
-                description="Confirmed lodging arrangements"
+                description="Lodging arrangements and voucher references"
               />
             </CardHeader>
-            <CardContent className="p-5 space-y-4">
+            <CardContent className="p-4 space-y-3">
               {tour.hotels.map((hotel) => (
                 <div
                   key={hotel.id}
-                  className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1.5"
+                  className="p-3 rounded-md border border-slate-200 bg-slate-50/50 space-y-1.5 shadow-xs"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-semibold text-slate-800 leading-tight">
+                    <p className="text-xs sm:text-sm font-semibold text-slate-900 leading-snug">
                       {hotel.hotelName}
                     </p>
-                    <span className="text-xs text-slate-500 font-medium shrink-0">
+                    <span className="text-[11px] text-slate-500 font-medium shrink-0 bg-white border border-slate-200 px-1.5 py-0.2 rounded">
                       {hotel.city}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-600">
+                  <p className="text-[11px] text-slate-600">
                     {formatDateShort(hotel.checkIn)} – {formatDateShort(hotel.checkOut)} ({nightsBetween(hotel.checkIn, hotel.checkOut)} nights)
                   </p>
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
                     <span>
                       {hotel.roomCount} × {hotel.roomType}
                     </span>
                     {hotel.confirmationNumber ? (
-                      <span className="font-mono text-slate-600">
-                        Ref: {hotel.confirmationNumber}
+                      <span className="font-mono text-slate-700 font-medium bg-white px-1.5 py-0.2 rounded border border-slate-200">
+                        Voucher: {hotel.confirmationNumber}
                       </span>
                     ) : (
-                      <span className="text-amber-600 font-medium">Pending Property Ref</span>
+                      <span className="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
+                        Voucher Pending
+                      </span>
                     )}
                   </div>
                 </div>
@@ -551,35 +590,37 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
 
           {/* Special Requests */}
           <Card>
-            <CardHeader>
+            <CardHeader className="bg-slate-50/50">
               <SectionHeader
-                title="Special Requests & Notes"
-                description="Dietary, accessibility, and guest preferences"
+                title="Special Requests & Dietary"
+                description="Guest preferences and accessibility notes"
               />
             </CardHeader>
-            <CardContent className="p-5">
+            <CardContent className="p-4">
               {tour.specialRequests.length === 0 ? (
-                <p className="text-xs text-slate-400 italic">No special requests logged.</p>
+                <p className="text-xs text-slate-400 italic text-center py-2">
+                  No special dietary or accessibility requests logged.
+                </p>
               ) : (
-                <ul className="space-y-3">
+                <ul className="space-y-2.5">
                   {tour.specialRequests.map((req) => (
                     <li
                       key={req.id}
-                      className="text-xs flex items-start gap-2.5 p-2.5 rounded bg-slate-50 border border-slate-200"
+                      className="text-xs flex items-start gap-2.5 p-2.5 rounded-md bg-slate-50 border border-slate-200"
                     >
                       {req.resolved ? (
-                        <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                        <CheckCircle2 size={15} className="text-emerald-600 shrink-0 mt-0.5" />
                       ) : (
-                        <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                        <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
                       )}
-                      <div>
-                        <span className="font-semibold text-slate-700 capitalize">
+                      <div className="min-w-0">
+                        <span className="font-semibold text-slate-800 uppercase text-[10px] tracking-wider text-slate-500">
                           [{req.category}]:{" "}
                         </span>
-                        <span className="text-slate-600">{req.description}</span>
+                        <span className="text-slate-700">{req.description}</span>
                         <div className="mt-1">
                           <span
-                            className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                            className={`text-[10px] font-medium px-1.5 py-0.2 rounded ${
                               req.resolved
                                 ? "bg-emerald-100 text-emerald-800"
                                 : "bg-amber-100 text-amber-800"
@@ -598,7 +639,7 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
         </div>
       </div>
 
-      {/* Edit Drawer Modal */}
+      {/* ── Edit Drawer Modal ────────────────────────────────────────────────── */}
       {isEditOpen && (
         <EditTourModal
           tour={tour}
