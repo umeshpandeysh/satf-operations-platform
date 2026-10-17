@@ -221,6 +221,8 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           resolved: true,
         },
       ],
+      issues: [],
+      sourceProvenance: "Legacy Chart Sheet AUG-19 (Row 2, STW #1151933)",
       operationalNotes:
         "Tour is currently active in Rajasthan. All hotels confirmed. Guide checked in on schedule.",
     },
@@ -413,6 +415,15 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           resolved: false,
         },
       ],
+      issues: [
+        {
+          id: "iss-002a",
+          category: "vehicle",
+          description: "Driver and vehicle allocation pending with Kerala transport partner",
+          resolved: false,
+        },
+      ],
+      sourceProvenance: "Legacy Chart Sheet JULY-19 (Row 2, STW #1151757)",
       operationalNotes:
         "Upcoming arrival in 2 days. Driver and vehicle allocation must be finalized before arrival.",
     },
@@ -605,6 +616,21 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           resolved: false,
         },
       ],
+      issues: [
+        {
+          id: "iss-003a",
+          category: "vehicle",
+          description: "Primary vehicle breakdown reported; replacement vehicle allocation pending",
+          resolved: false,
+        },
+        {
+          id: "iss-003b",
+          category: "hotel",
+          description: "Hotel Pink City Classic Jaipur confirmation number pending",
+          resolved: false,
+        },
+      ],
+      sourceProvenance: "Legacy Chart Sheet OCT 2025 (Row 2, STW #1253572)",
       operationalNotes:
         "ATTENTION: Primary vehicle breakdown reported this morning. Replacement vehicle dispatch in progress. Hotel Pink City Classic Jaipur confirmation number pending.",
     },
@@ -781,6 +807,27 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
         },
       ],
       specialRequests: [],
+      issues: [
+        {
+          id: "iss-004a",
+          category: "guide",
+          description: "Himachal-certified Japanese-speaking guide unassigned",
+          resolved: false,
+        },
+        {
+          id: "iss-004b",
+          category: "vehicle",
+          description: "Mountain-certified 4WD vehicle required for Rohtang Pass unassigned",
+          resolved: false,
+        },
+        {
+          id: "iss-004c",
+          category: "permit",
+          description: "Rohtang Pass special transit permit pending confirmation with HP transport authorities",
+          resolved: false,
+        },
+      ],
+      sourceProvenance: "Legacy Chart Sheet JAN 2026 (Row 2, STW #1253602, Flagged: year serial mismatch 2025)",
       operationalNotes:
         "ATTENTION: Mountain-certified guide and 4WD vehicle unassigned. Rohtang Pass permit pending confirmation with Himachal transport authorities.",
     },
@@ -976,6 +1023,8 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           resolved: true,
         },
       ],
+      issues: [],
+      sourceProvenance: "Legacy Chart Sheet MAY-19 (Row 2, STW #1129637)",
       operationalNotes: "Tour completed successfully. Post-tour debrief and feedback received.",
     },
 
@@ -1167,6 +1216,8 @@ export function getMockTours(referenceDate: string = getIndiaTodayISO()): Tour[]
           resolved: true,
         },
       ],
+      issues: [],
+      sourceProvenance: "Legacy Chart Sheet SEP-19 (Row 2, STW #1159402)",
       operationalNotes:
         "All bookings confirmed. Guide briefed on pilgrimage etiquette. Temple permissions confirmed.",
     },

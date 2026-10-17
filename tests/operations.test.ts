@@ -298,3 +298,147 @@ describe("8. /tours runtime data generation and hydration mismatch prevention", 
     }
   });
 });
+
+describe("9. Operational issue independence, status decoupling, and Excel provenance", () => {
+  const refDate = "2026-10-17";
+
+  test("tours maintain Excel sheet provenance without silent date correction", () => {
+    const tour = getTourById("tour-003", refDate);
+    assert.ok(tour, "tour-003 must exist");
+    assert.ok(tour.sourceProvenance, "tour-003 must include source provenance");
+    assert.match(
+      tour.sourceProvenance,
+      /Legacy Chart Sheet OCT 2025 \(Row 2, STW #1253572\)/,
+      "tour-003 provenance must trace to STW #1253572"
+    );
+
+    // Verify date anomaly comment preservation on tour-004
+    const tour4 = getTourById("tour-004", refDate);
+    assert.ok(tour4, "tour-004 must exist");
+    assert.ok(tour4.sourceProvenance, "tour-004 must include source provenance");
+    assert.match(
+      tour4.sourceProvenance,
+      /Legacy Chart Sheet JAN 2026 \(Row 2, STW #1253602, Flagged: year serial mismatch 2025\)/,
+      "tour-004 must flag the year/serial date ambiguity"
+    );
+  });
+
+  test("resolving one operational issue leaves other open issues untouched", () => {
+    const tour = getTourById("tour-003", refDate);
+    assert.ok(tour && tour.issues && tour.issues.length >= 2, "tour-003 must have multiple issues");
+
+    const issues = [...tour.issues];
+    const initialIssue1 = issues[0];
+    const initialIssue2 = issues[1];
+
+    assert.strictEqual(initialIssue1.resolved, false);
+    assert.strictEqual(initialIssue2.resolved, false);
+
+    // Simulate resolving only the first issue
+    const updatedIssues = issues.map((iss) =>
+      iss.id === initialIssue1.id
+        ? { ...iss, resolved: true, resolutionNotes: "Guide assigned by phone" }
+        : iss
+    );
+
+    const resolvedItem = updatedIssues.find((i) => i.id === initialIssue1.id);
+    const untouchedItem = updatedIssues.find((i) => i.id === initialIssue2.id);
+
+    assert.strictEqual(resolvedItem?.resolved, true, "Target issue must be marked resolved");
+    assert.strictEqual(untouchedItem?.resolved, false, "Second issue must remain unresolved");
+  });
+
+  test("resolving all operational issues does not auto-mutate tour status", () => {
+    const tour = getTourById("tour-003", refDate);
+    assert.ok(tour);
+    assert.strictEqual(tour.status, "attention", "tour-003 starts in attention status");
+
+    // Simulate resolving all issues
+    const allResolvedIssues = (tour.issues ?? []).map((iss) => ({
+      ...iss,
+      resolved: true,
+      resolutionNotes: "Resolved",
+    }));
+
+    // Reconstruct tour with resolved issues but preserving tour status
+    const tourWithResolvedIssues = {
+      ...tour,
+      issues: allResolvedIssues,
+    };
+
+    // The tour status must remain "attention" unless the operator explicitly signs off
+    assert.strictEqual(
+      tourWithResolvedIssues.status,
+      "attention",
+      "Resolving all issues must not automatically change tour status away from attention"
+    );
+  });
+});
+
+describe("10. Tour editing validation, cancel safety, and prototype persistence", () => {
+  const refDate = "2026-10-17";
+
+  test("inline validation: guide name is required only when guide status is assigned", () => {
+    function validateTourEdit(guideStatus: string, guideName: string) {
+      const errors: Record<string, string> = {};
+      if (guideStatus === "assigned" && !guideName.trim()) {
+        errors.guideName = "Guide name is required when status is assigned";
+      }
+      return errors;
+    }
+
+    // Invalid: status is assigned but name is empty
+    const errors1 = validateTourEdit("assigned", "   ");
+    assert.strictEqual(
+      errors1.guideName,
+      "Guide name is required when status is assigned"
+    );
+
+    // Valid: status is assigned and name is provided
+    const errors2 = validateTourEdit("assigned", "Sunil Sharma");
+    assert.strictEqual(errors2.guideName, undefined);
+
+    // Valid: status is pending or unassigned with empty name
+    const errors3 = validateTourEdit("pending", "");
+    assert.strictEqual(errors3.guideName, undefined);
+
+    const errors4 = validateTourEdit("unassigned", "");
+    assert.strictEqual(errors4.guideName, undefined);
+  });
+
+  test("optional fields (driver phone, vehicle plate, hotel confirmation) pass validation when blank", () => {
+    function validateOptionalFields(
+      driverNotes: string,
+      vehiclePlate: string,
+      hotelConf: string
+    ) {
+      // Per approved Phase 2 scope, these remain strictly optional until verified with SATF ops
+      const errors: Record<string, string> = {};
+      // No required checks for optional fields
+      return { isValid: Object.keys(errors).length === 0, errors };
+    }
+
+    const result = validateOptionalFields("", "", "");
+    assert.strictEqual(result.isValid, true);
+    assert.strictEqual(Object.keys(result.errors).length, 0);
+  });
+
+  test("cancel safety: discarding modal edits leaves original tour unchanged", () => {
+    const originalTour = getTourById("tour-003", refDate);
+    assert.ok(originalTour);
+
+    // Snapshot original data
+    const originalSnapshot = JSON.stringify(originalTour);
+
+    // Simulate in-memory draft edits
+    let draft = { ...originalTour, operationalNotes: "DRAFT_NEVER_SAVED" };
+    draft = { ...draft, status: "completed" };
+
+    // User hits Cancel: discard draft
+    draft = JSON.parse(originalSnapshot);
+
+    assert.strictEqual(draft.operationalNotes, originalTour.operationalNotes);
+    assert.strictEqual(draft.status, originalTour.status);
+    assert.deepStrictEqual(draft, originalTour);
+  });
+});

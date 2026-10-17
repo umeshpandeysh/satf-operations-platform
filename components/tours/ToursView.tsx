@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Search, SlidersHorizontal, Globe, ChevronRight } from "lucide-react";
 import {
@@ -11,6 +11,11 @@ import {
 } from "@/components/ui/Primitives";
 import { cn } from "@/components/ui/utils";
 import type { Tour, TourStatus } from "@/lib/types";
+import {
+  subscribeSessionStore,
+  getSessionSnapshot,
+  getServerSnapshot,
+} from "@/lib/session-store";
 import {
   formatDate,
   TOUR_STATUS_CLASSES,
@@ -32,12 +37,32 @@ export interface ToursViewProps {
 }
 
 export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
+  const sessionRaw = useSyncExternalStore(
+    subscribeSessionStore,
+    getSessionSnapshot,
+    getServerSnapshot
+  );
+
+  const sessionTours = useMemo(() => {
+    if (!sessionRaw) return null;
+    try {
+      return JSON.parse(sessionRaw) as Record<string, Tour>;
+    } catch {
+      return null;
+    }
+  }, [sessionRaw]);
+
+  const tours = useMemo(() => {
+    if (!sessionTours) return initialTours;
+    return initialTours.map((tour) => sessionTours[tour.id] ?? tour);
+  }, [initialTours, sessionTours]);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TourStatus | "all">("all");
 
   const filtered = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return initialTours.filter((tour) => {
+    return tours.filter((tour) => {
       const matchesStatus =
         statusFilter === "all" || tour.status === statusFilter;
       const matchesSearch =
@@ -47,7 +72,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
         tour.destination.toLowerCase().includes(q);
       return matchesStatus && matchesSearch;
     });
-  }, [initialTours, searchQuery, statusFilter]);
+  }, [tours, searchQuery, statusFilter]);
 
   return (
     <PageContainer>

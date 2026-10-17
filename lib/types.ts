@@ -114,6 +114,23 @@ export interface GuestGroup {
   notes?: string;
 }
 
+export interface OperationalIssue {
+  id: string;
+  category:
+    | "vehicle"
+    | "guide"
+    | "hotel"
+    | "flight"
+    | "permit"
+    | "special_request"
+    | "other";
+  description: string;
+  resolved: boolean;
+  resolutionNotes?: string;
+  /** Prototype assumption: recorded resolution timestamp */
+  resolvedAt?: string;
+}
+
 // ─── Primary Tour entity ─────────────────────────────────────────────────────
 
 export interface Tour {
@@ -133,6 +150,10 @@ export interface Tour {
   itinerary: ItineraryEntry[];
   assignments: ResourceAssignment[];
   specialRequests: SpecialRequest[];
+  /** Discrete operational issues tracking independent blockers */
+  issues?: OperationalIssue[];
+  /** Provenance reference to legacy Excel sheet & row where applicable */
+  sourceProvenance?: string;
   /** Free-text internal notes for operations staff */
   operationalNotes?: string;
   /** ISO datetime of last record update */
