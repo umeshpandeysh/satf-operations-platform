@@ -1,13 +1,13 @@
-import { Users } from "lucide-react";
-import { PlaceholderPage } from "@/components/ui/Primitives";
+import { getMockTours } from "@/lib/mock-data";
+import { getIndiaTodayISO } from "@/lib/utils";
+import { AssignmentsView } from "@/components/assignments/AssignmentsView";
+
+// Ensure dynamic date generation on Asia/Kolkata reference time
+export const dynamic = "force-dynamic";
 
 export default function AssignmentsPage() {
-  return (
-    <PlaceholderPage
-      title="Driver, Guide & Vehicle Assignments"
-      description="The assignments module will allow dispatchers to manage guide rosters, driver allocations, vehicle fleet assignments, and vendor confirmations. Planned for Phase 2."
-      plannedPhase="Phase 2"
-      icon={Users}
-    />
-  );
+  const initialTours = getMockTours();
+  const today = getIndiaTodayISO();
+
+  return <AssignmentsView initialTours={initialTours} referenceDate={today} />;
 }
