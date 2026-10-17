@@ -13,6 +13,8 @@ import {
   RotateCcw,
   Info,
   FileSpreadsheet,
+  Ban,
+  X,
 } from "lucide-react";
 import {
   PageContainer,
@@ -40,14 +42,19 @@ import {
   parseSessionSnapshot,
   type StorageOperationResult,
 } from "@/lib/session-store";
+import { cancelTour } from "@/lib/operations";
 import { EditTourModal } from "./EditTourModal";
 
 interface TourDetailClientProps {
-  initialTour: Tour;
+  initialTour: Tour | null;
+  tourId?: string;
 }
 
-export function TourDetailClient({ initialTour }: TourDetailClientProps) {
+export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps) {
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -61,10 +68,12 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
     return parseSessionSnapshot(sessionRaw);
   }, [sessionRaw]);
 
+  const effectiveId = initialTour?.id ?? tourId ?? "";
+
   const sessionTour = useMemo(() => {
-    if (sessionState.status !== "ready" || !sessionState.tours) return null;
-    return sessionState.tours[initialTour.id] ?? null;
-  }, [sessionState, initialTour.id]);
+    if (sessionState.status !== "ready" || !sessionState.tours || !effectiveId) return null;
+    return sessionState.tours[effectiveId] ?? null;
+  }, [sessionState, effectiveId]);
 
   const tour = sessionTour ?? initialTour;
   const hasSessionModifications = Boolean(sessionTour);
@@ -83,8 +92,9 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
   }
 
   function handleReset() {
+    if (!tour) return;
     setErrorMessage(null);
-    const result = clearSessionTour(initialTour.id);
+    const result = clearSessionTour(tour.id);
     if (!result.success) {
       setErrorMessage(
         result.error || "Failed to reset tour record in browser session storage."
@@ -94,6 +104,49 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
     }
     setFeedbackMessage("Tour record reverted to baseline mock state.");
     setTimeout(() => setFeedbackMessage(null), 4000);
+  }
+
+  function handleConfirmCancel() {
+    if (!tour) return;
+    const trimmed = cancelReason.trim();
+    if (!trimmed || trimmed.length < 5) {
+      setCancelError("A valid cancellation reason of at least 5 characters is required.");
+      return;
+    }
+    const cancelRes = cancelTour(tour, trimmed);
+    if (!cancelRes.success || !cancelRes.tour) {
+      setCancelError(cancelRes.error || "Failed to cancel tour.");
+      return;
+    }
+    const saveRes = saveSessionTour(cancelRes.tour);
+    if (!saveRes.success) {
+      setCancelError(saveRes.error || "Failed to save cancellation to session storage.");
+      return;
+    }
+    setIsCancelModalOpen(false);
+    setFeedbackMessage(`Tour ${tour.bookingReference} has been successfully cancelled.`);
+    setTimeout(() => setFeedbackMessage(null), 4000);
+  }
+
+  if (!tour) {
+    return (
+      <PageContainer>
+        <div className="bg-white border border-slate-200 rounded-lg p-8 text-center max-w-md mx-auto my-12 shadow-xs">
+          <AlertCircle size={36} className="text-amber-500 mx-auto mb-3" />
+          <h2 className="text-base font-bold text-slate-900">Tour Record Not Found</h2>
+          <p className="text-xs text-slate-500 mt-1 mb-4">
+            No tour matching identifier <span className="font-mono font-semibold">{effectiveId || "unknown"}</span> exists in baseline mock records or your current browser session.
+          </p>
+          <Link
+            href="/tours"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-xs transition-colors"
+          >
+            <ArrowLeft size={13} />
+            Back to Tours Roster
+          </Link>
+        </div>
+      </PageContainer>
+    );
   }
 
   const durationNights = nightsBetween(tour.arrivalDate, tour.departureDate);
@@ -139,6 +192,21 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
 
           <StatusBadge status={tour.status} />
 
+          {tour.status !== "cancelled" && (
+            <button
+              type="button"
+              onClick={() => {
+                setCancelReason("");
+                setCancelError(null);
+                setIsCancelModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-red-700 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md shadow-xs transition-colors"
+            >
+              <Ban size={12} />
+              Cancel Tour
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setIsEditOpen(true)}
@@ -151,6 +219,28 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
       </div>
 
       {/* ── Alerts & Prototype Disclaimer ───────────────────────────────────── */}
+      {tour.status === "cancelled" && (
+        <div
+          role="alert"
+          className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-900 flex items-start gap-2.5 shadow-xs"
+        >
+          <Ban size={18} className="text-red-600 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <div className="font-bold flex items-center gap-2 text-red-900">
+              <span>TOUR CANCELLED</span>
+              {tour.cancelledAt && (
+                <span className="font-normal font-mono text-[11px] text-red-700">
+                  (Cancelled on {formatDate(tour.cancelledAt)})
+                </span>
+              )}
+            </div>
+            <p className="text-red-800">
+              <span className="font-semibold">Reason: </span>
+              {tour.cancellationReason || "No explicit reason specified."}
+            </p>
+          </div>
+        </div>
+      )}
       {sessionState.status === "error" && (
         <div
           role="alert"
@@ -647,6 +737,95 @@ export function TourDetailClient({ initialTour }: TourDetailClientProps) {
           onClose={() => setIsEditOpen(false)}
           onSave={handleSave}
         />
+      )}
+
+      {/* ── Cancel Tour Confirmation Modal ────────────────────────────────────── */}
+      {isCancelModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cancel-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs"
+        >
+          <div className="bg-white rounded-lg shadow-xl border border-slate-200 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-red-50/50">
+              <div className="flex items-center gap-2 text-red-700">
+                <Ban size={18} />
+                <h3 id="cancel-modal-title" className="text-sm font-bold text-slate-900">
+                  Cancel Tour Operation
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCancelModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md transition-colors"
+                aria-label="Close cancel dialog"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                You are about to cancel tour{" "}
+                <strong className="text-slate-900 font-mono">{tour.bookingReference}</strong> (
+                {tour.group.groupName}). This will change its status to{" "}
+                <span className="font-semibold text-red-700">Cancelled</span> across all views.
+              </p>
+
+              {cancelError && (
+                <div
+                  role="alert"
+                  className="bg-red-50 border border-red-200 rounded-md p-2.5 text-xs text-red-800 flex items-start gap-2"
+                >
+                  <AlertCircle size={14} className="text-red-600 shrink-0 mt-0.5" />
+                  <span>{cancelError}</span>
+                </div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="cancel-reason-input"
+                  className="block text-xs font-semibold text-slate-700 mb-1"
+                >
+                  Cancellation Reason <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  id="cancel-reason-input"
+                  rows={3}
+                  value={cancelReason}
+                  onChange={(e) => {
+                    setCancelReason(e.target.value);
+                    if (cancelError) setCancelError(null);
+                  }}
+                  placeholder="e.g. Guest requested cancellation due to medical emergency / flight schedule disrupted"
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                  required
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Minimum 5 characters. This will be preserved in the session audit trail.
+                </span>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCancelModalOpen(false)}
+                className="px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white border border-slate-300 rounded-md shadow-xs transition-colors"
+              >
+                Keep Active
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancel}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md shadow-xs transition-colors"
+              >
+                Confirm Cancellation
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </PageContainer>
   );

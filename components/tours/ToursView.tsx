@@ -13,6 +13,8 @@ import {
   Calendar,
   X,
   AlertCircle,
+  PlusCircle,
+  CheckCircle2,
 } from "lucide-react";
 import {
   PageContainer,
@@ -23,6 +25,7 @@ import {
   StatusBadge,
   Badge,
 } from "@/components/ui/Primitives";
+import { CreateTourModal } from "./CreateTourModal";
 import { cn } from "@/components/ui/utils";
 import type { Tour, TourStatus } from "@/lib/types";
 import {
@@ -72,6 +75,12 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TourStatus | "all">("all");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+
+  const existingReferences = useMemo(() => {
+    return tours.map((t) => t.bookingReference);
+  }, [tours]);
 
   // Live status counts
   const statusCounts = useMemo(() => {
@@ -200,6 +209,14 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
         </div>
       </div>
 
+      {/* Feedback banner */}
+      {feedbackMessage && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-xs font-medium text-emerald-800 flex items-center gap-2 shadow-xs">
+          <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+          <span>{feedbackMessage}</span>
+        </div>
+      )}
+
       {/* ── Operational Data Table ─────────────────────────────────────────── */}
       <Card>
         <CardHeader className="bg-slate-50/50 py-2.5 px-4 flex items-center justify-between">
@@ -211,9 +228,19 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
               {filtered.length} {filtered.length === 1 ? "record" : "records"}
             </Badge>
           </div>
-          <span className="text-[11px] text-slate-400">
-            Click row or booking reference to open operations file
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-slate-400 hidden sm:inline">
+              Click row to open operations file
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <PlusCircle size={13} />
+              <span>New Tour</span>
+            </button>
+          </div>
         </CardHeader>
 
         {filtered.length === 0 ? (
@@ -378,6 +405,17 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
           </span>
         </CardFooter>
       </Card>
+
+      {/* Create Tour Modal */}
+      <CreateTourModal
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onTourCreated={(newTour) => {
+          setFeedbackMessage(`Tour ${newTour.bookingReference} (${newTour.group.groupName}) successfully created in session.`);
+          setStatusFilter("all");
+        }}
+        existingReferences={existingReferences}
+      />
     </PageContainer>
   );
 }

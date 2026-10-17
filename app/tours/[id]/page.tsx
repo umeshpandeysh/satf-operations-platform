@@ -1,4 +1,3 @@
-import { notFound } from "next/navigation";
 import { getTourById } from "@/lib/mock-data";
 import { TourDetailClient } from "@/components/tours/TourDetailClient";
 
@@ -13,9 +12,5 @@ export default async function TourDetailPage({ params }: TourDetailPageProps) {
   const { id } = await params;
   const tour = getTourById(id);
 
-  if (!tour) {
-    notFound();
-  }
-
-  return <TourDetailClient initialTour={tour} />;
+  return <TourDetailClient initialTour={tour ?? null} tourId={id} />;
 }
