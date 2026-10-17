@@ -31,7 +31,7 @@ import {
   clearAllSessionTours,
   mergeSessionTours,
   parseSessionSnapshot,
-  STORAGE_KEY,
+  SESSION_STORAGE_KEY,
 } from "@/lib/session-store";
 import { formatDate } from "@/lib/utils";
 
@@ -221,7 +221,7 @@ export function SettingsView({ initialTours, referenceDate }: SettingsViewProps)
             <div className="flex items-center justify-between py-2 border-b border-slate-100">
               <span className="text-slate-500 font-medium">Storage Key</span>
               <span className="font-mono text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
-                {STORAGE_KEY}
+                {SESSION_STORAGE_KEY}
               </span>
             </div>
 

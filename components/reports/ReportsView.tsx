@@ -196,11 +196,11 @@ export function ReportsView({ initialTours, referenceDate }: ReportsViewProps) {
       t.flights.forEach((f) => {
         rows.push([
           f.direction.toUpperCase(),
-          f.departureDate,
+          f.date,
           f.flightNumber,
           f.airline || "Scheduled Carrier",
           f.terminal || "T3",
-          f.direction === "arrival" ? f.landingTime || "TBD" : f.departureTime || "TBD",
+          f.direction === "arrival" ? f.arrivalTime || "TBD" : f.departureTime || "TBD",
           t.bookingReference,
           t.group.groupName,
           pax,
@@ -262,10 +262,9 @@ export function ReportsView({ initialTours, referenceDate }: ReportsViewProps) {
       "Group Name",
       "Tour Status",
       "Issue Category",
-      "Severity",
       "Issue Description",
-      "Status",
-      "Created At",
+      "Resolution Status",
+      "Resolution Notes",
     ];
 
     const rows: (string | number | undefined | null)[][] = [];
@@ -277,10 +276,9 @@ export function ReportsView({ initialTours, referenceDate }: ReportsViewProps) {
           t.group.groupName,
           t.status.toUpperCase(),
           i.category.toUpperCase(),
-          i.severity.toUpperCase(),
           i.description,
           i.resolved ? "RESOLVED" : "OPEN ACTION REQUIRED",
-          i.createdAt ? i.createdAt.slice(0, 10) : t.arrivalDate,
+          i.resolutionNotes || "—",
         ]);
       });
     });

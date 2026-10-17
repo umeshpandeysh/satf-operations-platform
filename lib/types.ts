@@ -96,13 +96,17 @@ export interface ItineraryEntry {
   notes?: string;
 }
 
+export type AssignmentRole = "guide" | "driver" | "vehicle" | "coordinator";
+
 export interface ResourceAssignment {
   id: string;
-  role: "guide" | "driver" | "vehicle" | "coordinator";
+  role: AssignmentRole;
   status: AssignmentStatus;
   name?: string;
   /** e.g. vehicle registration, guide ID */
   reference?: string;
+  /** Contact phone number or direct line */
+  contact?: string;
   /** Approved structured vehicle type */
   vehicleType?: VehicleType;
   notes?: string;
