@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { parseExcelWorkbook } from "@/lib/excel-parser";
+import {
+  parseExcelWorkbook,
+  validateExcelSignature,
+  MAX_WORKBOOK_SIZE_BYTES,
+} from "@/lib/excel-parser";
 import { authenticateOperatorRequest } from "@/lib/auth";
+import type { ImportPreviewResult } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +21,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 1. Early Content-Length validation prior to buffering multipart body
+    const contentLength = req.headers.get("content-length");
+    if (contentLength) {
+      const bytes = parseInt(contentLength, 10);
+      if (!isNaN(bytes) && bytes > MAX_WORKBOOK_SIZE_BYTES) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `File size exceeds the maximum limit of 25 MB (received ${Math.round(
+              bytes / (1024 * 1024)
+            )} MB).`,
+          },
+          { status: 413 }
+        );
+      }
+    }
+
     const contentType = req.headers.get("content-type") || "";
     let buffer: Buffer | null = null;
     let seasonFilter: string | undefined;
@@ -25,14 +47,64 @@ export async function POST(req: NextRequest) {
       const file = formData.get("file") as File | null;
       seasonFilter = (formData.get("seasonFilter") as string) || undefined;
 
-      if (!file) {
+      if (!file || typeof file === "string") {
         return NextResponse.json(
           { success: false, error: "No file was uploaded." },
           { status: 400 }
         );
       }
+
+      // 2. Validate file size
+      if (file.size === 0) {
+        return NextResponse.json(
+          { success: false, error: "The uploaded file is empty." },
+          { status: 400 }
+        );
+      }
+
+      if (file.size > MAX_WORKBOOK_SIZE_BYTES) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `File size exceeds the maximum limit of 25 MB (received ${Math.round(
+              file.size / (1024 * 1024)
+            )} MB).`,
+          },
+          { status: 413 }
+        );
+      }
+
+      // 3. Validate file extension
+      const fileName = (file.name || "").toLowerCase().trim();
+      const isXls = fileName.endsWith(".xls");
+      const isXlsx = fileName.endsWith(".xlsx");
+
+      if (!isXls && !isXlsx) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Unsupported file type. Only Excel workbooks (.xls and .xlsx) are accepted.",
+          },
+          { status: 400 }
+        );
+      }
+
       const arrayBuffer = await file.arrayBuffer();
       buffer = Buffer.from(arrayBuffer);
+
+      // 4. Validate file signature (magic bytes)
+      const expectedFormat = isXls ? "xls" : "xlsx";
+      if (!validateExcelSignature(buffer, expectedFormat)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Invalid file signature: Content does not match a valid ${
+              isXls ? ".xls (OLE2 Compound Document)" : ".xlsx (ZIP Archive)"
+            } spreadsheet.`,
+          },
+          { status: 400 }
+        );
+      }
     } else {
       const body = await req.json().catch(() => ({}));
       seasonFilter = body.seasonFilter;
@@ -45,7 +117,22 @@ export async function POST(req: NextRequest) {
             { status: 404 }
           );
         }
+
+        const stat = fs.statSync(stagedPath);
+        if (stat.size > MAX_WORKBOOK_SIZE_BYTES) {
+          return NextResponse.json(
+            { success: false, error: "Staged workbook exceeds the 25 MB limit." },
+            { status: 413 }
+          );
+        }
+
         buffer = fs.readFileSync(stagedPath);
+        if (!validateExcelSignature(buffer)) {
+          return NextResponse.json(
+            { success: false, error: "Staged workbook has an invalid or corrupted file signature." },
+            { status: 400 }
+          );
+        }
       } else {
         return NextResponse.json(
           { success: false, error: "Invalid request payload. Expected file upload or { action: 'load_staged' }" },
@@ -54,12 +141,26 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const preview = parseExcelWorkbook(buffer, { seasonFilter });
+    // 5. Safe Parsing with Graceful Error Trapping
+    let preview: ImportPreviewResult;
+    try {
+      preview = parseExcelWorkbook(buffer, { seasonFilter });
+    } catch (parseErr) {
+      console.error("Workbook parsing error:", parseErr instanceof Error ? parseErr.message : parseErr);
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Failed to parse workbook: File content is corrupted or contains an invalid Excel internal structure.",
+        },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json(preview);
   } catch (err) {
     console.error("Import preview error:", err);
     return NextResponse.json(
-      { success: false, error: err instanceof Error ? err.message : String(err) },
+      { success: false, error: "An unexpected error occurred while processing the workbook preview." },
       { status: 500 }
     );
   }

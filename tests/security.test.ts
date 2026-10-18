@@ -33,6 +33,12 @@ import { POST as commitRoute } from "../app/api/import/commit/route";
 import { POST as statusRoute } from "../app/api/import/status/route";
 import { POST as previewRoute } from "../app/api/import/preview/route";
 import { GET as exportReportRoute } from "../app/api/import/export-report/route";
+import * as XLSX from "xlsx";
+import {
+  validateExcelSignature,
+  detectExcelFormat,
+  MAX_WORKBOOK_SIZE_BYTES,
+} from "../lib/excel-parser";
 
 describe("CSV Export — Formula Injection Prevention (CWE-1236)", () => {
   test("neutralizes leading equals sign (=) formula trigger", () => {
@@ -680,5 +686,205 @@ describe("Operator Authentication, Session Management & Protected Routes", () =>
     assert.ok(csvContent.startsWith("Booking Reference,Guest Name"));
     assert.ok(csvContent.includes("\"SATF-EXP-1\""));
     assert.ok(csvContent.includes("\"Tanaka Family\""));
+  });
+});
+
+describe("Excel Upload Security Hardening — Size, Format & Signature Validation", () => {
+  test("validateExcelSignature correctly verifies OLE2 and ZIP headers and rejects non-spreadsheets", () => {
+    // Valid OLE2 .xls magic bytes
+    const ole2Header = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+    assert.strictEqual(validateExcelSignature(ole2Header, "xls"), true);
+    assert.strictEqual(validateExcelSignature(ole2Header), true);
+    assert.strictEqual(detectExcelFormat(ole2Header), "xls");
+
+    // Valid ZIP .xlsx magic bytes
+    const zipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x06, 0x00]);
+    assert.strictEqual(validateExcelSignature(zipHeader, "xlsx"), true);
+    assert.strictEqual(validateExcelSignature(zipHeader), true);
+    assert.strictEqual(detectExcelFormat(zipHeader), "xlsx");
+
+    // Mismatched expected format
+    assert.strictEqual(validateExcelSignature(ole2Header, "xlsx"), false);
+    assert.strictEqual(validateExcelSignature(zipHeader, "xls"), false);
+
+    // Invalid non-spreadsheet buffers
+    const textBuffer = Buffer.from("<html><body>Not an Excel document</body></html>");
+    assert.strictEqual(validateExcelSignature(textBuffer), false);
+    assert.strictEqual(detectExcelFormat(textBuffer), null);
+
+    const pdfBuffer = Buffer.from("%PDF-1.4 malicious payload");
+    assert.strictEqual(validateExcelSignature(pdfBuffer), false);
+    assert.strictEqual(detectExcelFormat(pdfBuffer), null);
+
+    const emptyBuffer = Buffer.from([]);
+    assert.strictEqual(validateExcelSignature(emptyBuffer), false);
+    assert.strictEqual(detectExcelFormat(emptyBuffer), null);
+  });
+
+  test("early Content-Length validation rejects requests exceeding 25 MB before body parsing (HTTP 413)", async () => {
+    const { token, payload } = createSessionToken("Upload Controller");
+    const oversizedLength = 30 * 1024 * 1024; // 30 MB
+
+    const req = new NextRequest("http://localhost:3000/api/import/preview", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+        "content-type": "multipart/form-data; boundary=----WebKitFormBoundaryX",
+        "content-length": String(oversizedLength),
+      },
+    });
+
+    const res = await previewRoute(req);
+    assert.strictEqual(res.status, 413);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.error.includes("25 MB"));
+  });
+
+  test("file.size validation rejects oversized files uploaded within limits (HTTP 413)", async () => {
+    const { token, payload } = createSessionToken("Upload Controller");
+    const formData = new FormData();
+    // Simulate oversized file (26 MB)
+    const largeBuffer = Buffer.alloc(26 * 1024 * 1024);
+    largeBuffer[0] = 0xd0;
+    largeBuffer[1] = 0xcf;
+    largeBuffer[2] = 0x11;
+    largeBuffer[3] = 0xe0;
+    const file = new File([largeBuffer], "massive_chart.xls", { type: "application/vnd.ms-excel" });
+    formData.append("file", file);
+
+    const req = new NextRequest("http://localhost:3000/api/import/preview", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+      },
+      body: formData,
+    });
+
+    const res = await previewRoute(req);
+    assert.strictEqual(res.status, 413);
+    const data = await res.json();
+    assert.ok(data.error.includes("25 MB"));
+  });
+
+  test("rejects unsupported file extensions (HTTP 400)", async () => {
+    const { token, payload } = createSessionToken("Upload Controller");
+    const formData = new FormData();
+    const csvFile = new File([Buffer.from("a,b,c\n1,2,3")], "schedule.csv", { type: "text/csv" });
+    formData.append("file", csvFile);
+
+    const req = new NextRequest("http://localhost:3000/api/import/preview", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+      },
+      body: formData,
+    });
+
+    const res = await previewRoute(req);
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.error.includes("Unsupported file type"));
+  });
+
+  test("rejects spoofed file extensions with invalid magic bytes (HTTP 400)", async () => {
+    const { token, payload } = createSessionToken("Upload Controller");
+    const formData = new FormData();
+    // Text file pretending to be .xls
+    const spoofedXls = new File([Buffer.from("MZ\x90\x00executable content disguised as xls")], "chart.xls", {
+      type: "application/vnd.ms-excel",
+    });
+    formData.append("file", spoofedXls);
+
+    const req = new NextRequest("http://localhost:3000/api/import/preview", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+      },
+      body: formData,
+    });
+
+    const res = await previewRoute(req);
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.error.includes("Invalid file signature"));
+  });
+
+  test("handles malformed workbooks gracefully without 500 error or stack trace (HTTP 400)", async () => {
+    const { token, payload } = createSessionToken("Upload Controller");
+    const formData = new FormData();
+    // Valid ZIP signature (PK\x03\x04) but corrupted internal structure
+    const corruptedZip = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xff, 0xff, 0x00, 0x00, 0xaa, 0xbb]);
+    const malformedFile = new File([corruptedZip], "corrupted.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    formData.append("file", malformedFile);
+
+    const req = new NextRequest("http://localhost:3000/api/import/preview", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+      },
+      body: formData,
+    });
+
+    const res = await previewRoute(req);
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.error.includes("Failed to parse workbook") || data.error.includes("corrupted"));
+  });
+
+  test("accepts valid synthetic Excel workbook upload (.xlsx) (HTTP 200)", async () => {
+    const { token, payload } = createSessionToken("Upload Controller");
+    // Generate valid minimal workbook using SheetJS
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["Header 1", "Header 2", "Header 3"],
+      ["Row 1", "Row 2", "Row 3"],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "OCT 2025");
+    const validBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    const formData = new FormData();
+    const validFile = new File([validBuffer], "valid_schedule.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    formData.append("file", validFile);
+
+    const req = new NextRequest("http://localhost:3000/api/import/preview", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+      },
+      body: formData,
+    });
+
+    const res = await previewRoute(req);
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+    assert.ok(data.summary);
+    assert.ok(Array.isArray(data.tours));
   });
 });

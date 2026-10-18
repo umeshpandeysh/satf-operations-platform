@@ -16,6 +16,76 @@ import type {
   VehicleType,
 } from "./types";
 
+export const MAX_WORKBOOK_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
+
+function toBytes(buffer: Buffer | ArrayBuffer | Uint8Array): Uint8Array {
+  if (buffer instanceof Uint8Array) {
+    return buffer;
+  }
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Validate that buffer starts with valid Excel magic bytes.
+ */
+export function validateExcelSignature(
+  buffer: Buffer | ArrayBuffer | Uint8Array,
+  expectedFormat?: "xls" | "xlsx"
+): boolean {
+  if (!buffer) return false;
+  const bytes = toBytes(buffer);
+  if (bytes.length < 4) return false;
+
+  const isOsl =
+    bytes[0] === 0xd0 &&
+    bytes[1] === 0xcf &&
+    bytes[2] === 0x11 &&
+    bytes[3] === 0xe0;
+
+  const isZip =
+    bytes[0] === 0x50 &&
+    bytes[1] === 0x4b &&
+    ((bytes[2] === 0x03 && bytes[3] === 0x04) ||
+      (bytes[2] === 0x05 && bytes[3] === 0x06) ||
+      (bytes[2] === 0x07 && bytes[3] === 0x08));
+
+  if (expectedFormat === "xls") return isOsl;
+  if (expectedFormat === "xlsx") return isZip;
+  return isOsl || isZip;
+}
+
+/**
+ * Detect Excel document format from file signature.
+ */
+export function detectExcelFormat(
+  buffer: Buffer | ArrayBuffer | Uint8Array
+): "xls" | "xlsx" | null {
+  if (!buffer) return null;
+  const bytes = toBytes(buffer);
+  if (bytes.length < 4) return null;
+
+  if (
+    bytes[0] === 0xd0 &&
+    bytes[1] === 0xcf &&
+    bytes[2] === 0x11 &&
+    bytes[3] === 0xe0
+  ) {
+    return "xls";
+  }
+
+  if (
+    bytes[0] === 0x50 &&
+    bytes[1] === 0x4b &&
+    ((bytes[2] === 0x03 && bytes[3] === 0x04) ||
+      (bytes[2] === 0x05 && bytes[3] === 0x06) ||
+      (bytes[2] === 0x07 && bytes[3] === 0x08))
+  ) {
+    return "xlsx";
+  }
+
+  return null;
+}
+
 export interface ParseOptions {
   /** If specified, only parse sheets belonging to this season (e.g. '2025-2026') */
   seasonFilter?: string;
