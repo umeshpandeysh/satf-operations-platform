@@ -354,10 +354,10 @@ export function SettingsView({ initialTours, referenceDate }: SettingsViewProps)
       <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs text-slate-600 space-y-2 shadow-xs">
         <div className="flex items-center gap-2 font-bold text-slate-800">
           <Shield size={16} className="text-blue-600" />
-          <span>Operational Platform Architectural Integrity Policy</span>
+          <span>Operational Platform Persistent Storage Policy</span>
         </div>
         <p className="leading-relaxed text-[11px] text-slate-500">
-          The SATF Operations Platform frontend runs without backend database dependencies for this phase. Storage state is isolated to browser session storage (<code className="font-mono text-slate-700 bg-white px-1 py-0.5 rounded border border-slate-200">sessionStorage</code>). Edits, created tours, and cancellations survive client-side route transitions and page refreshes within the active tab, but will reset upon tab closure or explicit manual data reset.
+          The SATF Operations Platform uses authenticated server-backed API endpoints (<code className="font-mono text-slate-700 bg-white px-1 py-0.5 rounded border border-slate-200">/api/operations/tours</code>) for tour creation, edits, cancellations, and assignments. Operational data is structured for ACID persistence in Supabase PostgreSQL with optimistic concurrency locking. When database environment variables are not configured, requests fail closed with actionable notifications rather than silently falling back to ephemeral browser storage.
         </p>
       </div>
 

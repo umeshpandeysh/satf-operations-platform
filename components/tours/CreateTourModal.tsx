@@ -16,7 +16,7 @@ import {
   createNewTour,
   type NewTourInput,
 } from "@/lib/operations";
-import { saveSessionTour, type StorageOperationResult } from "@/lib/session-store";
+import { createOperationalTour } from "@/lib/operations-client";
 import { addDaysToISO, getIndiaTodayISO } from "@/lib/utils";
 
 interface CreateTourModalProps {
@@ -100,21 +100,22 @@ export function CreateTourModal({
     const newTour = createNewTour(input);
 
     setIsSubmitting(true);
+    setStorageError(null);
     try {
-      const result: StorageOperationResult = saveSessionTour(newTour);
+      const result = await createOperationalTour(newTour);
       if (!result.success) {
         setStorageError(
           result.error ||
-            "Failed to save new tour in browser storage. Your input has been kept in this dialog."
+            "Failed to save new tour in persistent storage. Your input has been kept in this dialog."
         );
         setIsSubmitting(false);
         return;
       }
 
-      onTourCreated(newTour);
+      onTourCreated(result.tour || newTour);
       onClose();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unexpected storage failure";
+      const msg = err instanceof Error ? err.message : "Unexpected persistence failure";
       setStorageError(`Failed to save tour: ${msg}`);
       setIsSubmitting(false);
     }

@@ -70,9 +70,15 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
 
   const sessionTours = sessionState.tours;
 
+  const [createdTours, setCreatedTours] = useState<Tour[]>([]);
+
   const tours = useMemo(() => {
-    return mergeSessionTours(initialTours, sessionTours);
-  }, [initialTours, sessionTours]);
+    const base = mergeSessionTours(initialTours, sessionTours);
+    if (createdTours.length === 0) return base;
+    const existingIds = new Set(base.map((t) => t.id));
+    const newItems = createdTours.filter((t) => !existingIds.has(t.id));
+    return [...newItems, ...base];
+  }, [initialTours, sessionTours, createdTours]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TourStatus | "all">("all");
@@ -538,7 +544,8 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         onTourCreated={(newTour) => {
-          setFeedbackMessage(`Tour ${newTour.bookingReference} (${newTour.group.groupName}) successfully created in session.`);
+          setCreatedTours((prev) => [newTour, ...prev]);
+          setFeedbackMessage(`Tour ${newTour.bookingReference} (${newTour.group.groupName}) successfully registered.`);
           setStatusFilter("all");
         }}
         existingReferences={existingReferences}

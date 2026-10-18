@@ -39,6 +39,24 @@ import {
   detectExcelFormat,
   MAX_WORKBOOK_SIZE_BYTES,
 } from "../lib/excel-parser";
+import {
+  GET as getOperationsToursRoute,
+  POST as postOperationsToursRoute,
+} from "../app/api/operations/tours/route";
+import {
+  GET as getOperationsTourByIdRoute,
+  PUT as putOperationsTourRoute,
+  POST as postOperationsTourActionRoute,
+} from "../app/api/operations/tours/[id]/route";
+import { mergeCoordinatorFields } from "../lib/operations";
+import {
+  getDatabaseConfigStatus,
+  logAuditEvent,
+  executeAtomicTourMutation,
+  createPersistentTour,
+  updatePersistentTour,
+  cancelPersistentTour,
+} from "../lib/operational-store";
 
 describe("CSV Export — Formula Injection Prevention (CWE-1236)", () => {
   test("neutralizes leading equals sign (=) formula trigger", () => {
@@ -886,5 +904,467 @@ describe("Excel Upload Security Hardening — Size, Format & Signature Validatio
     assert.strictEqual(data.success, true);
     assert.ok(data.summary);
     assert.ok(Array.isArray(data.tours));
+  });
+});
+
+describe("Persistent Operations APIs — Authorization, Validation, Concurrency & Safe Degradation", () => {
+  test("GET /api/operations/tours rejects unauthenticated callers with HTTP 401 (CWE-306)", async () => {
+    const req = new NextRequest("http://localhost:3000/api/operations/tours", {
+      method: "GET",
+    });
+    const res = await getOperationsToursRoute(req);
+    assert.strictEqual(res.status, 401);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.strictEqual(data.tours, undefined);
+  });
+
+  test("GET /api/operations/tours succeeds for authenticated operator and reports database config status", async () => {
+    const { token } = createSessionToken("Operations Coordinator");
+    const req = new NextRequest("http://localhost:3000/api/operations/tours", {
+      method: "GET",
+      headers: {
+        cookie: `${COOKIE_NAME}=${token}`,
+      },
+    });
+    const res = await getOperationsToursRoute(req);
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+    assert.strictEqual(typeof data.configured, "boolean");
+    assert.ok(Array.isArray(data.tours));
+  });
+
+  test("POST /api/operations/tours rejects unauthenticated callers with HTTP 401", async () => {
+    const req = new NextRequest("http://localhost:3000/api/operations/tours", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ tour: { bookingReference: "TEST-01" } }),
+    });
+    const res = await postOperationsToursRoute(req);
+    assert.strictEqual(res.status, 401);
+  });
+
+  test("POST /api/operations/tours rejects requests with missing or invalid CSRF token with HTTP 403", async () => {
+    const { token } = createSessionToken("Operations Coordinator");
+    const req = new NextRequest("http://localhost:3000/api/operations/tours", {
+      method: "POST",
+      headers: {
+        cookie: `${COOKIE_NAME}=${token}`,
+        "content-type": "application/json",
+        // Missing x-csrf-token header
+      },
+      body: JSON.stringify({ tour: { bookingReference: "TEST-01" } }),
+    });
+    const res = await postOperationsToursRoute(req);
+    assert.strictEqual(res.status, 403);
+  });
+
+  test("POST /api/operations/tours validates payload and rejects malformed inputs with HTTP 400", async () => {
+    const { token, payload } = createSessionToken("Operations Coordinator");
+    const req = new NextRequest("http://localhost:3000/api/operations/tours", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ tour: { bookingReference: "" } }), // Missing required fields
+    });
+    const res = await postOperationsToursRoute(req);
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.error.includes("Missing required tour fields"));
+  });
+
+  test("POST /api/operations/tours returns HTTP 503 DATABASE_NOT_CONFIGURED when Supabase is not configured", async () => {
+    const { token, payload } = createSessionToken("Operations Coordinator");
+    const req = new NextRequest("http://localhost:3000/api/operations/tours", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        tour: {
+          id: "tour-new-001",
+          bookingReference: "SATF-NEW-001",
+          group: { groupName: "Yamamoto Party", adultCount: 4, childCount: 0, nationality: "Japanese", language: "Japanese" },
+          status: "upcoming",
+          arrivalDate: "2026-11-01",
+          departureDate: "2026-11-08",
+          flights: [],
+          hotels: [],
+          assignments: [],
+          specialRequests: [],
+        },
+      }),
+    });
+    const res = await postOperationsToursRoute(req);
+    // When Supabase is not configured, must fail closed with 503 without silent fallback
+    assert.strictEqual(res.status, 503);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.strictEqual(data.code, "DATABASE_NOT_CONFIGURED");
+    assert.ok(data.error.includes("SUPABASE_URL") || data.error.includes("persistence is not configured"));
+  });
+
+  test("PUT /api/operations/tours/[id] rejects unauthenticated callers with HTTP 401", async () => {
+    const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "tour-001" }),
+    });
+    const res = await putOperationsTourRoute(req, { params: Promise.resolve({ id: "tour-001" }) });
+    assert.strictEqual(res.status, 401);
+  });
+
+  test("PUT /api/operations/tours/[id] returns HTTP 503 DATABASE_NOT_CONFIGURED when Supabase is unconfigured", async () => {
+    const { token, payload } = createSessionToken("Operations Coordinator");
+    const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
+      method: "PUT",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        tour: {
+          id: "tour-001",
+          bookingReference: "SATF-2025-001",
+          group: { groupName: "Test", adultCount: 2, childCount: 0, nationality: "Japanese", language: "Japanese" },
+          status: "active",
+          arrivalDate: "2026-10-20",
+          departureDate: "2026-10-25",
+          flights: [],
+          hotels: [],
+          assignments: [],
+          specialRequests: [],
+        },
+      }),
+    });
+    const res = await putOperationsTourRoute(req, { params: Promise.resolve({ id: "tour-001" }) });
+    assert.strictEqual(res.status, 503);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.strictEqual(data.code, "DATABASE_NOT_CONFIGURED");
+  });
+
+  test("POST /api/operations/tours/[id] (cancel) validates cancellation reason length (HTTP 400)", async () => {
+    const { token, payload } = createSessionToken("Operations Coordinator");
+    const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ action: "cancel", reason: "no" }), // Less than 5 chars
+    });
+    const res = await postOperationsTourActionRoute(req, { params: Promise.resolve({ id: "tour-001" }) });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.error.includes("at least 5 characters"));
+  });
+
+  test("mergeCoordinatorFields preserves coordinator-assigned guide, driver, hotel confirmation, and issues", () => {
+    const existingTour: Tour = {
+      id: "tour-preserve-01",
+      bookingReference: "SATF-2025-P01",
+      group: { id: "grp-1", groupName: "Inoue Party", adultCount: 2, childCount: 0, nationality: "Japanese", language: "Japanese" },
+      status: "active",
+      destination: "Delhi-Agra",
+      arrivalDate: "2025-10-15",
+      departureDate: "2025-10-22",
+      flights: [],
+      hotels: [{ id: "h-1", hotelName: "Oberoi Amarvilas", city: "Agra", checkIn: "2025-10-16", checkOut: "2025-10-18", roomType: "double", roomCount: 1, confirmationNumber: "AGRA-OB-9988" }],
+      itinerary: [],
+      assignments: [
+        { id: "a-1", role: "guide", status: "assigned", name: "Rajesh Kumar", reference: "G-101" },
+        { id: "a-2", role: "driver", status: "assigned", name: "Suresh Singh", notes: "Prefers Japanese tea" },
+        { id: "a-3", role: "vehicle", status: "assigned", reference: "DL-1VA-9999", vehicleType: "Innova" },
+      ],
+      specialRequests: [],
+      issues: [
+        { id: "iss-1", category: "special_request", description: "Vegetarian breakfast required", resolved: true, resolutionNotes: "Chef notified and menu adjusted" }
+      ],
+      operationalNotes: "VIP repeat customer from Tokyo",
+      lastUpdated: "2026-10-18T10:00:00.000Z",
+    };
+
+    // Incoming raw Excel tour with unassigned fields
+    const incomingExcelTour: Tour = {
+      id: "tour-preserve-01",
+      bookingReference: "SATF-2025-P01",
+      group: { id: "grp-1", groupName: "Inoue Party", adultCount: 2, childCount: 0, nationality: "Japanese", language: "Japanese" },
+      status: "upcoming",
+      destination: "Delhi-Agra",
+      arrivalDate: "2025-10-15",
+      departureDate: "2025-10-22",
+      flights: [],
+      hotels: [{ id: "h-1", hotelName: "Oberoi Amarvilas", city: "Agra", checkIn: "2025-10-16", checkOut: "2025-10-18", roomType: "double", roomCount: 1 }],
+      itinerary: [],
+      assignments: [
+        { id: "a-1", role: "guide", status: "unassigned" },
+        { id: "a-2", role: "driver", status: "unassigned" },
+        { id: "a-3", role: "vehicle", status: "unassigned" },
+      ],
+      specialRequests: [],
+      issues: [],
+      lastUpdated: "2025-10-15T00:00:00.000Z",
+    };
+
+    const merged = mergeCoordinatorFields(incomingExcelTour, existingTour);
+
+    // Assert coordinator-managed fields are faithfully preserved
+    const guide = merged.assignments.find((a) => a.role === "guide");
+    assert.strictEqual(guide?.status, "assigned");
+    assert.strictEqual(guide?.name, "Rajesh Kumar");
+
+    const driver = merged.assignments.find((a) => a.role === "driver");
+    assert.strictEqual(driver?.status, "assigned");
+    assert.strictEqual(driver?.name, "Suresh Singh");
+    assert.strictEqual(driver?.notes, "Prefers Japanese tea");
+
+    const vehicle = merged.assignments.find((a) => a.role === "vehicle");
+    assert.strictEqual(vehicle?.reference, "DL-1VA-9999");
+
+    const hotel = merged.hotels[0];
+    assert.strictEqual(hotel?.confirmationNumber, "AGRA-OB-9988");
+
+    assert.strictEqual(merged.issues?.length, 1);
+    assert.strictEqual(merged.issues?.[0]?.resolved, true);
+    assert.strictEqual(merged.operationalNotes, "VIP repeat customer from Tokyo");
+  });
+
+  test("mergeCoordinatorFields preserves manual tour cancellation and reason on Excel re-import", () => {
+    const cancelledExistingTour: Tour = {
+      id: "tour-cancelled-01",
+      bookingReference: "SATF-2025-C01",
+      group: { id: "grp-c", groupName: "Tanaka Group", adultCount: 3, childCount: 0, nationality: "Japanese", language: "Japanese" },
+      status: "cancelled",
+      cancellationReason: "Cancelled due to international flight disruption",
+      cancelledAt: "2025-10-14T08:00:00.000Z",
+      destination: "Golden Triangle",
+      arrivalDate: "2025-10-16",
+      departureDate: "2025-10-23",
+      flights: [],
+      hotels: [],
+      itinerary: [],
+      assignments: [],
+      specialRequests: [],
+      issues: [],
+      lastUpdated: "2025-10-14T08:00:00.000Z",
+    };
+
+    const incomingRawTour: Tour = {
+      id: "tour-cancelled-01",
+      bookingReference: "SATF-2025-C01",
+      group: { id: "grp-c", groupName: "Tanaka Group", adultCount: 3, childCount: 0, nationality: "Japanese", language: "Japanese" },
+      status: "upcoming",
+      destination: "Golden Triangle",
+      arrivalDate: "2025-10-16",
+      departureDate: "2025-10-23",
+      flights: [],
+      hotels: [],
+      itinerary: [],
+      assignments: [],
+      specialRequests: [],
+      issues: [],
+      lastUpdated: "2025-10-16T00:00:00.000Z",
+    };
+
+    const merged = mergeCoordinatorFields(incomingRawTour, cancelledExistingTour);
+    assert.strictEqual(merged.status, "cancelled");
+    assert.strictEqual(merged.cancellationReason, "Cancelled due to international flight disruption");
+    assert.strictEqual(merged.cancelledAt, "2025-10-14T08:00:00.000Z");
+  });
+
+  test("POST /api/operations/tours validates newTourInput departure date order (HTTP 400)", async () => {
+    const { token, payload } = createSessionToken("Operations Coordinator");
+    const req = new NextRequest("http://localhost:3000/api/operations/tours", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        newTourInput: {
+          bookingReference: "SATF-INVALID-DATE",
+          groupName: "Test Group",
+          adultCount: 2,
+          nationality: "Japanese",
+          language: "Japanese",
+          destination: "Delhi",
+          arrivalDate: "2026-11-15",
+          departureDate: "2026-11-10", // Departure BEFORE arrival!
+        },
+      }),
+    });
+    const res = await postOperationsToursRoute(req);
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.ok(data.validationErrors?.departureDate);
+  });
+
+  test("POST /api/operations/tours/[id] (cancel) with valid reason fails closed with 503 when Supabase unconfigured", async () => {
+    const { token, payload } = createSessionToken("Operations Coordinator");
+    const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
+      method: "POST",
+      headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
+        cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": payload.csrfToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ action: "cancel", reason: "Guest requested cancellation via travel agency" }),
+    });
+    const res = await postOperationsTourActionRoute(req, { params: Promise.resolve({ id: "tour-001" }) });
+    assert.strictEqual(res.status, 503);
+    const data = await res.json();
+    assert.strictEqual(data.success, false);
+    assert.strictEqual(data.code, "DATABASE_NOT_CONFIGURED");
+  });
+
+  test("GET /api/operations/tours/[id] rejects unauthenticated callers with HTTP 401", async () => {
+    const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
+      method: "GET",
+    });
+    const res = await getOperationsTourByIdRoute(req, { params: Promise.resolve({ id: "tour-001" }) });
+    assert.strictEqual(res.status, 401);
+  });
+
+  test("satf_schema.sql audit log FK uses ON DELETE SET NULL to preserve history on tour deletion", () => {
+    const schemaPath = path.join(__dirname, "..", "supabase", "satf_schema.sql");
+    const schemaContent = fs.readFileSync(schemaPath, "utf-8");
+
+    // Ensure audit log uses SET NULL so deleting a tour never cascades or erases dispatch audit history
+    assert.ok(
+      schemaContent.includes("REFERENCES public.satf_operational_tours(id) ON DELETE SET NULL"),
+      "satf_audit_log must use ON DELETE SET NULL to preserve audit entries when tours are deleted"
+    );
+    assert.ok(
+      !schemaContent.includes("REFERENCES public.satf_operational_tours(id) ON DELETE CASCADE"),
+      "satf_audit_log must NOT use ON DELETE CASCADE"
+    );
+    // Ensure booking_reference in audit log is NOT NULL
+    assert.ok(
+      schemaContent.includes("booking_reference TEXT NOT NULL"),
+      "satf_audit_log must keep booking_reference NOT NULL"
+    );
+  });
+
+  test("satf_schema.sql defines atomic transaction RPC satf_mutate_tour_atomic", () => {
+    const schemaPath = path.join(__dirname, "..", "supabase", "satf_schema.sql");
+    const schemaContent = fs.readFileSync(schemaPath, "utf-8");
+
+    assert.ok(
+      schemaContent.includes("FUNCTION public.satf_mutate_tour_atomic"),
+      "Schema must provide satf_mutate_tour_atomic for transactional tour and audit consistency"
+    );
+    assert.ok(
+      schemaContent.includes("CONCURRENCY_CONFLICT"),
+      "Atomic procedure must enforce optimistic concurrency checks"
+    );
+    assert.ok(
+      schemaContent.includes("INSERT INTO public.satf_audit_log"),
+      "Atomic procedure must write audit log inside the same transaction"
+    );
+  });
+
+  test("logAuditEvent fails cleanly without throwing when database is unconfigured", async () => {
+    const res = await logAuditEvent("tour-001", "SATF-TEST-REF", "create", "test-operator");
+    assert.strictEqual(res.success, false);
+    assert.ok(res.error);
+    assert.ok(res.error.includes("Database not configured") || res.error.includes("audit"));
+  });
+
+  test("persistent operations fail closed when database unconfigured without claiming unverified success", async () => {
+    const sampleTour: Tour = {
+      id: "tour-test-atomic",
+      bookingReference: "SATF-ATOMIC-01",
+      group: { id: "grp-a", groupName: "Atomic Test", adultCount: 2, childCount: 0, nationality: "Japanese", language: "Japanese" },
+      status: "upcoming",
+      destination: "Delhi",
+      arrivalDate: "2026-11-01",
+      departureDate: "2026-11-05",
+      flights: [],
+      hotels: [],
+      itinerary: [],
+      assignments: [],
+      specialRequests: [],
+      lastUpdated: new Date().toISOString(),
+    };
+
+    const createRes = await createPersistentTour(sampleTour);
+    assert.strictEqual(createRes.success, false);
+    assert.strictEqual(createRes.code, "DATABASE_NOT_CONFIGURED");
+
+    const updateRes = await updatePersistentTour(sampleTour, sampleTour.lastUpdated);
+    assert.strictEqual(updateRes.success, false);
+    assert.strictEqual(updateRes.code, "DATABASE_NOT_CONFIGURED");
+
+    const cancelRes = await cancelPersistentTour("tour-test-atomic", "Reason text here", sampleTour.lastUpdated);
+    assert.strictEqual(cancelRes.success, false);
+    assert.strictEqual(cancelRes.code, "DATABASE_NOT_CONFIGURED");
+  });
+
+  test("satf_schema.sql revokes RPC execute permissions from untrusted callers and grants only to service_role", () => {
+    const schemaPath = path.join(__dirname, "..", "supabase", "satf_schema.sql");
+    const schemaContent = fs.readFileSync(schemaPath, "utf-8");
+
+    // Must revoke from untrusted callers
+    assert.ok(
+      schemaContent.includes("REVOKE ALL ON FUNCTION public.satf_mutate_tour_atomic"),
+      "Must explicitly revoke satf_mutate_tour_atomic from PUBLIC/anon/authenticated"
+    );
+    assert.ok(
+      schemaContent.includes("REVOKE ALL ON FUNCTION public.satf_mutate_tour_atomic(JSONB, TEXT, TEXT, TIMESTAMPTZ) FROM anon;"),
+      "Must revoke satf_mutate_tour_atomic from anon"
+    );
+    assert.ok(
+      schemaContent.includes("GRANT EXECUTE ON FUNCTION public.satf_mutate_tour_atomic(JSONB, TEXT, TEXT, TIMESTAMPTZ) TO service_role;"),
+      "Must grant satf_mutate_tour_atomic exclusively to service_role"
+    );
+  });
+
+  test("executeAtomicTourMutation routes mutations to rpc/satf_mutate_tour_atomic and fails closed when unconfigured", async () => {
+    const sampleTour: Tour = {
+      id: "tour-atomic-route-check",
+      bookingReference: "SATF-RPC-01",
+      group: { id: "grp-r", groupName: "RPC Group", adultCount: 1, childCount: 0, nationality: "Japanese", language: "Japanese" },
+      status: "upcoming",
+      destination: "Delhi-Jaipur",
+      arrivalDate: "2026-12-01",
+      departureDate: "2026-12-05",
+      flights: [],
+      hotels: [],
+      itinerary: [],
+      assignments: [],
+      specialRequests: [],
+      lastUpdated: new Date().toISOString(),
+    };
+
+    const res = await executeAtomicTourMutation(sampleTour, "create", "test-operator");
+    assert.strictEqual(res.success, false);
+    assert.strictEqual(res.code, "DATABASE_NOT_CONFIGURED");
   });
 });

@@ -267,14 +267,14 @@ export function EditTourModal({
       if (!result.success) {
         setStorageError(
           result.error ||
-            "Failed to save changes to session storage. Your draft has been kept in this dialog."
+            "Failed to save changes to persistent storage. Your draft has been kept in this dialog."
         );
       }
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : "Unexpected storage failure";
+        err instanceof Error ? err.message : "Unexpected persistence failure";
       setStorageError(
-        `Failed to save changes to session storage: ${msg}. Your draft has been kept in this dialog.`
+        `Failed to save changes to persistent storage: ${msg}. Your draft has been kept in this dialog.`
       );
     } finally {
       setIsSaving(false);

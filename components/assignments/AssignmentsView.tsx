@@ -29,9 +29,9 @@ import {
   getSessionSnapshot,
   getServerSnapshot,
   mergeSessionTours,
-  saveSessionTour,
   parseSessionSnapshot,
 } from "@/lib/session-store";
+import { updateOperationalTour } from "@/lib/operations-client";
 import { detectAssignmentConflicts } from "@/lib/operations";
 import { formatDateShort } from "@/lib/utils";
 import { cn } from "@/components/ui/utils";
@@ -61,6 +61,8 @@ interface FlattenedAssignment {
 }
 
 export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
+  const [persistedTours, setPersistedTours] = useState<Record<string, Tour>>({});
+
   const sessionRaw = useSyncExternalStore(
     subscribeSessionStore,
     getSessionSnapshot,
@@ -72,8 +74,10 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
   }, [sessionRaw]);
 
   const tours = useMemo(() => {
-    return mergeSessionTours(initialTours, sessionState.tours);
-  }, [initialTours, sessionState.tours]);
+    const base = mergeSessionTours(initialTours, sessionState.tours);
+    if (Object.keys(persistedTours).length === 0) return base;
+    return base.map((t) => persistedTours[t.id] ?? t);
+  }, [initialTours, sessionState.tours, persistedTours]);
 
   // Operational conflict detection across active tours
   const conflicts = useMemo(() => {
@@ -95,6 +99,7 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
   const [draftNotes, setDraftNotes] = useState("");
   const [modalError, setModalError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Flatten assignments across non-cancelled tours
   const flattenedAssignments = useMemo(() => {
@@ -210,13 +215,16 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
   }
 
   // Save assignment changes
-  function handleSaveAssignment() {
+  async function handleSaveAssignment() {
     if (!editingAssignment) return;
 
     if (draftStatus === "assigned" && editingAssignment.role !== "vehicle" && !draftName.trim()) {
       setModalError(`A name is required when marking this ${editingAssignment.role} as Assigned.`);
       return;
     }
+
+    setIsSaving(true);
+    setModalError(null);
 
     const currentTour = editingAssignment.tour;
     const updatedAssignments = currentTour.assignments.map((a) => {
@@ -240,17 +248,28 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
       lastUpdated: new Date().toISOString(),
     };
 
-    const result = saveSessionTour(updatedTour);
-    if (!result.success) {
-      setModalError(result.error || "Failed to persist assignment update to browser storage.");
-      return;
-    }
+    try {
+      const result = await updateOperationalTour(updatedTour, currentTour.lastUpdated);
+      if (!result.success) {
+        setModalError(result.error || "Failed to persist assignment update to server database.");
+        setIsSaving(false);
+        return;
+      }
 
-    setEditingAssignment(null);
-    setSuccessNotice(
-      `Successfully updated ${editingAssignment.role} allocation for ${editingAssignment.bookingReference}.`
-    );
-    setTimeout(() => setSuccessNotice(null), 4000);
+      setPersistedTours((prev) => ({
+        ...prev,
+        [updatedTour.id]: result.tour || updatedTour,
+      }));
+      setEditingAssignment(null);
+      setSuccessNotice(
+        `Successfully updated ${editingAssignment.role} allocation for ${editingAssignment.bookingReference}.`
+      );
+      setTimeout(() => setSuccessNotice(null), 4000);
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : "Failed to persist assignment.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -821,9 +840,10 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
               <button
                 type="button"
                 onClick={handleSaveAssignment}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-xs transition-colors"
+                disabled={isSaving}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-md shadow-xs transition-colors"
               >
-                Save Assignment
+                {isSaving ? "Saving…" : "Save Assignment"}
               </button>
             </div>
           </div>

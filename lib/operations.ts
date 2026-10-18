@@ -471,3 +471,68 @@ export function detectAssignmentConflicts(tours: Tour[]): AssignmentConflict[] {
 
   return conflicts;
 }
+
+/**
+ * Merges newly parsed/imported tour data from an Excel workbook with an existing tour record,
+ * preserving all coordinator-managed fields (guide/driver/vehicle assignments, hotel confirmation
+ * numbers, operational notes, issues, and manual cancellation states).
+ */
+export function mergeCoordinatorFields(incoming: Tour, existing: Tour): Tour {
+  const isExistingCancelled = existing.status === "cancelled";
+
+  // 1. Merge assignments: preserve coordinator-assigned guide, driver, and vehicle
+  const mergedAssignments = incoming.assignments.map((incAssign) => {
+    const existAssign = existing.assignments.find((a) => a.role === incAssign.role);
+    if (!existAssign) return incAssign;
+
+    // If coordinator manually made an assignment or notes, preserve them
+    if (existAssign.status === "assigned" || existAssign.name || existAssign.reference || existAssign.notes) {
+      return {
+        ...incAssign,
+        status: existAssign.status,
+        name: existAssign.name || incAssign.name,
+        reference: existAssign.reference || incAssign.reference,
+        vehicleType: existAssign.vehicleType || incAssign.vehicleType,
+        notes: existAssign.notes || incAssign.notes,
+      };
+    }
+    return incAssign;
+  });
+
+  // 2. Merge hotels: preserve coordinator-entered confirmation numbers
+  const mergedHotels = incoming.hotels.map((incHotel, idx) => {
+    const existHotel =
+      existing.hotels[idx] || existing.hotels.find((h) => h.hotelName === incHotel.hotelName);
+    if (existHotel?.confirmationNumber) {
+      return {
+        ...incHotel,
+        confirmationNumber: existHotel.confirmationNumber,
+      };
+    }
+    return incHotel;
+  });
+
+  // 3. Merge issues: preserve coordinator issues and resolutions
+  const existingIssues = existing.issues || [];
+  const mergedIssues = [...(incoming.issues || [])];
+  for (const exIssue of existingIssues) {
+    const matchIdx = mergedIssues.findIndex((i) => i.id === exIssue.id);
+    if (matchIdx >= 0) {
+      mergedIssues[matchIdx] = exIssue;
+    } else {
+      mergedIssues.push(exIssue);
+    }
+  }
+
+  return {
+    ...incoming,
+    status: isExistingCancelled ? "cancelled" : incoming.status,
+    cancellationReason: isExistingCancelled ? existing.cancellationReason : incoming.cancellationReason,
+    cancelledAt: isExistingCancelled ? existing.cancelledAt : incoming.cancelledAt,
+    assignments: mergedAssignments,
+    hotels: mergedHotels,
+    issues: mergedIssues,
+    operationalNotes: existing.operationalNotes || incoming.operationalNotes,
+    lastUpdated: existing.lastUpdated || incoming.lastUpdated,
+  };
+}

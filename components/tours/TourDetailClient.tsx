@@ -34,7 +34,6 @@ import {
   ASSIGNMENT_STATUS_LABELS,
 } from "@/lib/utils";
 import {
-  saveSessionTour,
   clearSessionTour,
   subscribeSessionStore,
   getSessionSnapshot,
@@ -42,7 +41,10 @@ import {
   parseSessionSnapshot,
   type StorageOperationResult,
 } from "@/lib/session-store";
-import { cancelTour } from "@/lib/operations";
+import {
+  updateOperationalTour,
+  cancelOperationalTour,
+} from "@/lib/operations-client";
 import { EditTourModal } from "./EditTourModal";
 
 interface TourDetailClientProps {
@@ -75,18 +77,27 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
     return sessionState.tours[effectiveId] ?? null;
   }, [sessionState, effectiveId]);
 
-  const tour = sessionTour ?? initialTour;
-  const hasSessionModifications = Boolean(sessionTour);
+  const [persistedTour, setPersistedTour] = useState<Tour | null>(null);
 
-  function handleSave(updatedTour: Tour): StorageOperationResult {
+  const tour = persistedTour ?? sessionTour ?? initialTour;
+  const hasSessionModifications = Boolean(persistedTour || sessionTour);
+
+  async function handleSave(updatedTour: Tour): Promise<StorageOperationResult> {
     setErrorMessage(null);
-    const result = saveSessionTour(updatedTour);
+    const result = await updateOperationalTour(updatedTour, tour?.lastUpdated);
     if (!result.success) {
-      return result;
+      if (result.conflict) {
+        setErrorMessage(
+          result.error ||
+            "Concurrency Conflict: This tour was modified by another coordinator. Please reload the latest record."
+        );
+      }
+      return { success: false, error: result.error };
     }
 
+    setPersistedTour(result.tour || updatedTour);
     setIsEditOpen(false);
-    setFeedbackMessage("Operations record successfully updated for this browser session.");
+    setFeedbackMessage("Operations record successfully persisted to server database.");
     setTimeout(() => setFeedbackMessage(null), 4000);
     return { success: true };
   }
@@ -94,37 +105,44 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
   function handleReset() {
     if (!tour) return;
     setErrorMessage(null);
+    setPersistedTour(null);
     const result = clearSessionTour(tour.id);
     if (!result.success) {
       setErrorMessage(
-        result.error || "Failed to reset tour record in browser session storage."
+        result.error || "Failed to reset tour record."
       );
       setTimeout(() => setErrorMessage(null), 5000);
       return;
     }
-    setFeedbackMessage("Tour record reverted to baseline mock state.");
+    setFeedbackMessage("Tour record reverted to baseline dataset.");
     setTimeout(() => setFeedbackMessage(null), 4000);
   }
 
-  function handleConfirmCancel() {
+  async function handleConfirmCancel() {
     if (!tour) return;
     const trimmed = cancelReason.trim();
     if (!trimmed || trimmed.length < 5) {
       setCancelError("A valid cancellation reason of at least 5 characters is required.");
       return;
     }
-    const cancelRes = cancelTour(tour, trimmed);
-    if (!cancelRes.success || !cancelRes.tour) {
-      setCancelError(cancelRes.error || "Failed to cancel tour.");
+    setCancelError(null);
+    const cancelRes = await cancelOperationalTour(tour.id, trimmed, tour.lastUpdated);
+    if (!cancelRes.success) {
+      setCancelError(cancelRes.error || "Failed to persist cancellation to server database.");
       return;
     }
-    const saveRes = saveSessionTour(cancelRes.tour);
-    if (!saveRes.success) {
-      setCancelError(saveRes.error || "Failed to save cancellation to session storage.");
-      return;
+    if (cancelRes.tour) {
+      setPersistedTour(cancelRes.tour);
+    } else {
+      setPersistedTour({
+        ...tour,
+        status: "cancelled",
+        cancellationReason: trimmed,
+        cancelledAt: new Date().toISOString(),
+      });
     }
     setIsCancelModalOpen(false);
-    setFeedbackMessage(`Tour ${tour.bookingReference} has been successfully cancelled.`);
+    setFeedbackMessage(`Tour ${tour.bookingReference} has been successfully cancelled in server database.`);
     setTimeout(() => setFeedbackMessage(null), 4000);
   }
 

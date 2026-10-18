@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { parseExcelWorkbook } from "@/lib/excel-parser";
-import { saveCanonicalDataset, validateCanonicalPayload } from "@/lib/canonical-store";
+import {
+  saveCanonicalDataset,
+  validateCanonicalPayload,
+  getCanonicalTourById,
+  getCanonicalTours,
+} from "@/lib/canonical-store";
+import { mergeCoordinatorFields } from "@/lib/operations";
 import { authenticateOperatorRequest } from "@/lib/auth";
 import type { ImportPreviewResult } from "@/lib/types";
 
@@ -45,6 +51,34 @@ export async function POST(req: NextRequest) {
         { success: false, error: "Invalid commit request. Provide { action: 'commit_staged' } or { payload: previewResult }" },
         { status: 400 }
       );
+    }
+
+    // 1. Preserve coordinator-managed fields from previously existing records
+    result.tours = result.tours.map((incoming) => {
+      const existing = getCanonicalTourById(incoming.id) || getCanonicalTourById(incoming.bookingReference);
+      if (existing) {
+        return mergeCoordinatorFields(incoming, existing);
+      }
+      return incoming;
+    });
+
+    // 2. Prevent losing existing coordinator-created or non-overlapping tours from other sheets
+    const existingTours = getCanonicalTours();
+    if (existingTours.length > 0) {
+      const importedRefs = new Set(result.tours.map((t) => t.bookingReference.toLowerCase().trim()));
+      const importedIds = new Set(result.tours.map((t) => t.id.toLowerCase().trim()));
+
+      const nonOverlapping = existingTours.filter(
+        (t) => !importedRefs.has(t.bookingReference.toLowerCase().trim()) && !importedIds.has(t.id.toLowerCase().trim())
+      );
+
+      if (nonOverlapping.length > 0) {
+        result.tours = [...result.tours, ...nonOverlapping];
+        result.summary = {
+          ...result.summary,
+          canonicalToursCount: result.tours.length,
+        };
+      }
     }
 
     const saveRes = saveCanonicalDataset(result, "operational");
