@@ -232,6 +232,37 @@ describe("Excel Parser — Synthetic 3-Row Workbook End-to-End", () => {
     const tour = result.tours[0];
     assert.deepStrictEqual(tour.sourceSheets, ["APR-19", "MAY-19"]);
     assert.strictEqual(tour.itinerary.length, 2);
+    // Verified: Itinerary type and location evidence is preserved, not flattened to Delhi / sightseeing
+    assert.strictEqual(tour.itinerary[0].type, "arrival_transfer");
+    assert.strictEqual(tour.itinerary[0].location, "Delhi");
+    assert.strictEqual(tour.itinerary[1].type, "transfer");
+    assert.strictEqual(tour.itinerary[1].location, "Agra");
+  });
+
+  test("does not use fallback date 2025-10-01 and flags missing arrival serial as date ambiguity", () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      [undefined, undefined, undefined, undefined, undefined, undefined],
+      [undefined, undefined, undefined, undefined, undefined, undefined],
+      [undefined, "SH2", 9999999, "", "TANAKA SAN X01", "", ""],
+      [undefined, undefined, undefined, undefined, "", undefined, undefined],
+      [undefined, undefined, undefined, undefined, "", undefined, undefined],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "TEST-SHEET");
+    const wbBuf = XLSX.write(wb, { type: "buffer", bookType: "xls" });
+    const result = parseExcelWorkbook(wbBuf);
+
+    assert.strictEqual(result.tours.length, 1);
+    const tour = result.tours[0];
+    assert.notStrictEqual(tour.arrivalDate, "2025-10-01");
+    assert.strictEqual(tour.hasDateAmbiguity, true);
+    assert.ok(tour.dateAmbiguityReason?.includes("Missing arrival date"));
+  });
+
+  test("inferCircuitDestination returns unverified circuit instead of assuming default highlights", () => {
+    const unverified = inferCircuitDestination([], "");
+    assert.strictEqual(unverified, "Custom Circuit (Pending Itinerary Verification)");
+    assert.notStrictEqual(unverified, "North India Highlights Circuit");
   });
 });
 

@@ -2,13 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { parseExcelWorkbook } from "@/lib/excel-parser";
-import { saveCanonicalDataset } from "@/lib/canonical-store";
+import { saveCanonicalDataset, validateCanonicalPayload } from "@/lib/canonical-store";
+import { authenticateOperatorRequest } from "@/lib/auth";
 import type { ImportPreviewResult } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = authenticateOperatorRequest(req);
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { success: false, error: auth.error },
+        { status: auth.status }
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
     let result: ImportPreviewResult;
 
@@ -22,7 +31,14 @@ export async function POST(req: NextRequest) {
       }
       const buffer = fs.readFileSync(stagedPath);
       result = parseExcelWorkbook(buffer, { seasonFilter: body.seasonFilter });
-    } else if (body.payload && body.payload.summary && body.payload.tours) {
+    } else if (body.payload) {
+      const validation = validateCanonicalPayload(body.payload);
+      if (!validation.valid) {
+        return NextResponse.json(
+          { success: false, error: `Invalid payload structure: ${validation.error}` },
+          { status: 400 }
+        );
+      }
       result = body.payload as ImportPreviewResult;
     } else {
       return NextResponse.json(
@@ -33,9 +49,10 @@ export async function POST(req: NextRequest) {
 
     const saveRes = saveCanonicalDataset(result, "operational");
     if (!saveRes.success) {
+      const isValidationError = saveRes.error?.startsWith("Validation failed:");
       return NextResponse.json(
         { success: false, error: saveRes.error || "Failed to persist canonical dataset" },
-        { status: 500 }
+        { status: isValidationError ? 400 : 500 }
       );
     }
 

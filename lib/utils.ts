@@ -135,3 +135,20 @@ export const ITINERARY_TYPE_LABELS: Record<ItineraryEntryType, string> = {
   departure_transfer: "Departure Transfer",
   arrival_transfer: "Arrival Transfer",
 };
+
+// ─── CSV Security & Sanitization ───────────────────────────────────────────────
+
+/**
+ * Safely escape and sanitize a value for inclusion in a CSV file.
+ * Prevents CSV formula injection (CWE-1236) by neutralizing leading triggers (=, +, -, @, \t, \r, %).
+ */
+export function sanitizeCsvCell(val: unknown): string {
+  if (val === null || val === undefined) return '""';
+  let str = String(val).replace(/\r\n|\r|\n/g, " ");
+  const trimmed = str.trimStart();
+  if (/^[=+\-@\t\r%]/.test(trimmed)) {
+    str = `'${str}`;
+  }
+  const escaped = str.replace(/"/g, '""');
+  return `"${escaped}"`;
+}

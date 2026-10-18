@@ -1,16 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getCanonicalDataset } from "@/lib/canonical-store";
+import { sanitizeCsvCell } from "@/lib/utils";
+import { authenticateOperatorRequest } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-function escapeCSV(val: unknown): string {
-  if (val === null || val === undefined) return '""';
-  const str = String(val).replace(/"/g, '""');
-  return `"${str}"`;
-}
-
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const auth = authenticateOperatorRequest(req, { checkCsrf: false });
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { success: false, error: auth.error },
+        { status: auth.status }
+      );
+    }
+
     const dataset = getCanonicalDataset();
     if (!dataset || dataset.tours.length === 0) {
       return NextResponse.json(
@@ -43,23 +47,23 @@ export async function GET() {
       const guide = t.assignments.find((a) => a.role === "guide")?.name || "Unassigned";
       const vehicle = t.assignments.find((a) => a.role === "vehicle")?.notes || "Unassigned";
       return [
-        escapeCSV(t.bookingReference),
-        escapeCSV(t.group.groupName),
-        escapeCSV(t.group.adultCount),
-        escapeCSV(t.agency || ""),
-        escapeCSV(t.packageCode || ""),
-        escapeCSV(t.sourceSheet || ""),
-        escapeCSV(t.sourceRow || ""),
-        escapeCSV(t.sourceSheets?.join(", ") || ""),
-        escapeCSV(t.rawArrivalSerial || ""),
-        escapeCSV(t.arrivalDate),
-        escapeCSV(t.departureDate),
-        escapeCSV(t.destination),
-        escapeCSV(guide),
-        escapeCSV(vehicle),
-        escapeCSV(t.hasDateAmbiguity ? "YES" : "NO"),
-        escapeCSV(t.dateAmbiguityReason || ""),
-        escapeCSV(t.operationalNotes || ""),
+        sanitizeCsvCell(t.bookingReference),
+        sanitizeCsvCell(t.group.groupName),
+        sanitizeCsvCell(t.group.adultCount),
+        sanitizeCsvCell(t.agency || ""),
+        sanitizeCsvCell(t.packageCode || ""),
+        sanitizeCsvCell(t.sourceSheet || ""),
+        sanitizeCsvCell(t.sourceRow || ""),
+        sanitizeCsvCell(t.sourceSheets?.join(", ") || ""),
+        sanitizeCsvCell(t.rawArrivalSerial || ""),
+        sanitizeCsvCell(t.arrivalDate),
+        sanitizeCsvCell(t.departureDate),
+        sanitizeCsvCell(t.destination),
+        sanitizeCsvCell(guide),
+        sanitizeCsvCell(vehicle),
+        sanitizeCsvCell(t.hasDateAmbiguity ? "YES" : "NO"),
+        sanitizeCsvCell(t.dateAmbiguityReason || ""),
+        sanitizeCsvCell(t.operationalNotes || ""),
       ].join(",");
     });
 

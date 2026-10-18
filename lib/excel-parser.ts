@@ -225,7 +225,30 @@ export function inferCircuitDestination(itineraryTexts: string[], packageCode: s
   if (packageCode && packageCode.trim()) {
     return `Special Circuit (${packageCode.trim()})`;
   }
-  return "North India Highlights Circuit";
+  return "Custom Circuit (Pending Itinerary Verification)";
+}
+/**
+ * Deduce semantic itinerary entry type and location based on operational movement text.
+ */
+export function deduceItineraryTypeAndLocation(activity: string): {
+  type: ItineraryEntry["type"];
+  location: string;
+} {
+  const actUp = activity.toUpperCase();
+  let type: ItineraryEntry["type"] = "sightseeing";
+  if (actUp.includes("ARR")) type = "arrival_transfer";
+  else if (actUp.includes("APT") || actUp.includes("DEP")) type = "departure_transfer";
+  else if (actUp.includes("TRF") || actUp.includes("TR ")) type = "transfer";
+  else if (actUp.includes("SAFARI") || actUp.includes("BOAT")) type = "activity";
+
+  let location = "Delhi";
+  if (actUp.includes("JAI")) location = "Jaipur";
+  else if (actUp.includes("AGRA") || actUp.includes("GRA")) location = "Agra";
+  else if (actUp.includes("VNS") || actUp.includes("BSB")) location = "Varanasi";
+  else if (actUp.includes("JOD")) location = "Jodhpur";
+  else if (actUp.includes("UDR")) location = "Udaipur";
+
+  return { type, location };
 }
 
 /**
@@ -357,7 +380,7 @@ export function parseExcelWorkbook(
       for (let c = 6; c <= range.e.c; c++) {
         const act = s[r]?.[c]?.v;
         if (act && String(act).trim()) {
-          const dayDate = colDates.get(c) || arrivalDate || "2025-10-01";
+          const dayDate = colDates.get(c) || arrivalDate || "";
           itineraryDays.push({
             date: dayDate,
             activity: String(act).trim(),
@@ -365,24 +388,44 @@ export function parseExcelWorkbook(
         }
       }
 
-      // If arrival date not found in C0, fallback to first itinerary day
-      if (!arrivalDate && itineraryDays.length > 0) {
+      let hasDateAmbiguity = false;
+      let dateAmbiguityReason: string | undefined;
+
+      // If arrival date not found in C0, derive from first itinerary day with recorded ambiguity
+      if (!arrivalDate && itineraryDays.length > 0 && itineraryDays[0].date) {
         arrivalDate = itineraryDays[0].date;
+        hasDateAmbiguity = true;
+        dateAmbiguityReason = `Arrival serial missing in column 0; derived from first itinerary date (${arrivalDate}). Requires operational review.`;
+        ambiguities.push({
+          bookingReference: refStr,
+          sheet: sheetName,
+          row: r + 1,
+          reason: dateAmbiguityReason,
+          rawSerial: rawArrivalSerial,
+        });
       }
+
+      // If still missing, preserve raw state without inventing a fake date
       if (!arrivalDate) {
-        arrivalDate = "2025-10-01";
+        arrivalDate = "";
+        hasDateAmbiguity = true;
+        dateAmbiguityReason = `Missing arrival date: row contains no numeric Excel date serial or valid itinerary date. Requires operational review.`;
+        ambiguities.push({
+          bookingReference: refStr,
+          sheet: sheetName,
+          row: r + 1,
+          reason: dateAmbiguityReason,
+          rawSerial: rawArrivalSerial,
+        });
       }
 
       // Determine departure date
       let departureDate = arrivalDate;
-      if (itineraryDays.length > 0) {
+      if (itineraryDays.length > 0 && itineraryDays[itineraryDays.length - 1].date) {
         departureDate = itineraryDays[itineraryDays.length - 1].date;
       }
 
       // Ambiguity detection: check if sheet year indicates e.g. 2026, but arrival date resolves to 2025
-      let hasDateAmbiguity = false;
-      let dateAmbiguityReason: string | undefined;
-
       if (expectedSheetYear && arrivalDate) {
         const arrivalYear = arrivalDate.slice(0, 4);
         if (expectedSheetYear !== arrivalYear) {
@@ -427,20 +470,7 @@ export function parseExcelWorkbook(
 
       // Build itinerary objects
       const itinerary: ItineraryEntry[] = itineraryDays.map((d, i) => {
-        const actUp = d.activity.toUpperCase();
-        let type: ItineraryEntry["type"] = "sightseeing";
-        if (actUp.includes("ARR")) type = "arrival_transfer";
-        else if (actUp.includes("APT") || actUp.includes("DEP")) type = "departure_transfer";
-        else if (actUp.includes("TRF") || actUp.includes("TR ")) type = "transfer";
-        else if (actUp.includes("SAFARI") || actUp.includes("BOAT")) type = "activity";
-
-        let location = "Delhi";
-        if (actUp.includes("JAI")) location = "Jaipur";
-        else if (actUp.includes("AGRA") || actUp.includes("GRA")) location = "Agra";
-        else if (actUp.includes("VNS") || actUp.includes("BSB")) location = "Varanasi";
-        else if (actUp.includes("JOD")) location = "Jodhpur";
-        else if (actUp.includes("UDR")) location = "Udaipur";
-
+        const { type, location } = deduceItineraryTypeAndLocation(d.activity);
         return {
           id: `itn-${refStr}-${i + 1}`,
           date: d.date,
@@ -566,15 +596,18 @@ export function parseExcelWorkbook(
         if (mergedItineraryDays.length > 0) {
           base.arrivalDate = mergedItineraryDays[0].date;
           base.departureDate = mergedItineraryDays[mergedItineraryDays.length - 1].date;
-          base.itinerary = mergedItineraryDays.map((d, i) => ({
-            id: `itn-${ref}-${i + 1}`,
-            date: d.date,
-            startTime: "09:00",
-            type: "sightseeing" as const,
-            title: d.activity,
-            location: "Delhi",
-            durationMinutes: 180,
-          }));
+          base.itinerary = mergedItineraryDays.map((d, i) => {
+            const { type, location } = deduceItineraryTypeAndLocation(d.activity);
+            return {
+              id: `itn-${ref}-${i + 1}`,
+              date: d.date,
+              startTime: "09:00",
+              type,
+              title: d.activity,
+              location,
+              durationMinutes: 180,
+            };
+          });
           base.hotels = extractHotels(mergedItineraryDays, ref);
         }
       } else {

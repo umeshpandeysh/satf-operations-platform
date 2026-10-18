@@ -11,6 +11,9 @@ import {
   Eye,
   ShieldAlert,
   Info,
+  Lock,
+  ShieldCheck,
+  KeyRound,
 } from "lucide-react";
 import {
   Card,
@@ -45,6 +48,15 @@ export function ExcelImportManager() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const [operatorSession, setOperatorSession] = useState<{
+    authenticated: boolean;
+    operator?: string;
+    csrfToken?: string;
+  }>({ authenticated: false });
+  const [passphraseInput, setPassphraseInput] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/import/status");
@@ -61,6 +73,16 @@ export function ExcelImportManager() {
 
   useEffect(() => {
     let active = true;
+
+    fetch("/api/auth/session")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data) {
+          setOperatorSession(data);
+        }
+      })
+      .catch((e) => console.error("Initial session check error:", e));
+
     fetch("/api/import/status")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -78,13 +100,59 @@ export function ExcelImportManager() {
     };
   }, []);
 
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setAuthError(null);
+    setIsLoggingIn(true);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passphrase: passphraseInput }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setOperatorSession({
+          authenticated: true,
+          operator: data.operator,
+          csrfToken: data.csrfToken,
+        });
+        setPassphraseInput("");
+        setActionSuccess(`Operator session unlocked as ${data.operator}.`);
+      } else {
+        setAuthError(data.error || "Authentication failed. Check operator passphrase.");
+      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Network error during login.");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      setOperatorSession({ authenticated: false });
+      setActionSuccess("Operator session locked.");
+    } catch {}
+  }
+
   async function handleToggleMode(newMode: "operational" | "demo") {
     setActionError(null);
     setActionSuccess(null);
+
+    if (!operatorSession.authenticated) {
+      setActionError("Operator authentication required: Please unlock operator access above.");
+      return;
+    }
+
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (operatorSession.csrfToken) headers["x-csrf-token"] = operatorSession.csrfToken;
+
       const res = await fetch("/api/import/status", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ mode: newMode }),
       });
       const data = await res.json();
@@ -105,17 +173,26 @@ export function ExcelImportManager() {
   async function handleRunDryRunPreview(useStaged = false) {
     setActionError(null);
     setActionSuccess(null);
+
+    if (!operatorSession.authenticated) {
+      setActionError("Operator authentication required: Please unlock operator access above.");
+      return;
+    }
+
     setIsPreviewLoading(true);
     setPreviewResult(null);
 
     try {
       let res: Response;
       const seasonParam = selectedSeason === "ALL" ? undefined : selectedSeason;
+      const headers: Record<string, string> = {};
+      if (operatorSession.csrfToken) headers["x-csrf-token"] = operatorSession.csrfToken;
 
       if (useStaged) {
+        headers["Content-Type"] = "application/json";
         res = await fetch("/api/import/preview", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ action: "load_staged", seasonFilter: seasonParam }),
         });
       } else if (selectedFile) {
@@ -124,6 +201,7 @@ export function ExcelImportManager() {
         if (seasonParam) formData.append("seasonFilter", seasonParam);
         res = await fetch("/api/import/preview", {
           method: "POST",
+          headers,
           body: formData,
         });
       } else {
@@ -151,14 +229,23 @@ export function ExcelImportManager() {
 
   async function handleCommitImport() {
     if (!previewResult) return;
+
+    if (!operatorSession.authenticated) {
+      setActionError("Operator authentication required: Please unlock operator access above.");
+      return;
+    }
+
     setIsCommitting(true);
     setActionError(null);
     setActionSuccess(null);
 
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (operatorSession.csrfToken) headers["x-csrf-token"] = operatorSession.csrfToken;
+
       const res = await fetch("/api/import/commit", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ payload: previewResult }),
       });
 
@@ -198,6 +285,97 @@ export function ExcelImportManager() {
           <span>{actionError}</span>
         </div>
       )}
+
+      {/* ── Operator Session & Authorization Card ────────────────────────────── */}
+      <Card className="border-slate-200">
+        <CardHeader className="bg-slate-50/60 py-3 px-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <KeyRound size={16} className={operatorSession.authenticated ? "text-emerald-600" : "text-amber-600"} />
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+              Operator Authorization & Session Security
+            </h2>
+          </div>
+          <Badge
+            variant={operatorSession.authenticated ? "success" : "warning"}
+            className="font-semibold text-[11px] flex items-center gap-1"
+          >
+            {operatorSession.authenticated ? (
+              <>
+                <ShieldCheck size={12} className="text-emerald-600" />
+                <span>Session Active: {operatorSession.operator || "Duty Dispatcher"}</span>
+              </>
+            ) : (
+              <>
+                <Lock size={12} className="text-amber-600" />
+                <span>Locked — Passphrase Required</span>
+              </>
+            )}
+          </Badge>
+        </CardHeader>
+        <CardContent className="p-4 text-xs">
+          {operatorSession.authenticated ? (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-50/50 p-3 rounded-lg border border-emerald-200/80">
+              <div className="space-y-0.5">
+                <p className="font-semibold text-slate-900">
+                  Authorized Operator: <span className="font-mono text-emerald-800">{operatorSession.operator}</span>
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Protected operations enabled: dataset commits, preview parsing, mode changes, and CSV audits. Cookie secured with HttpOnly and SameSite=Strict.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-white hover:bg-slate-50 text-slate-700 font-medium border border-slate-200 shadow-xs transition-colors shrink-0"
+              >
+                <Lock size={13} className="text-slate-500" />
+                <span>Lock / End Session</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-start gap-2 bg-amber-50/60 p-3 rounded-lg border border-amber-200/80 text-[11px] text-amber-900">
+                <ShieldAlert size={15} className="text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold">Protected Operations Boundary</p>
+                  <p className="text-amber-800 mt-0.5">
+                    Modifying operational data, executing workbook previews, and downloading guest reports requires an active server-side operator session.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleLogin} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="password"
+                    value={passphraseInput}
+                    onChange={(e) => setPassphraseInput(e.target.value)}
+                    placeholder="Enter operator passphrase..."
+                    className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-300 rounded text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    disabled={isLoggingIn}
+                  />
+                  <Lock size={13} className="absolute left-2.5 top-2.5 text-slate-400" />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isLoggingIn || !passphraseInput.trim()}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-1.5 bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white rounded text-xs font-semibold shadow-xs transition-colors shrink-0"
+                >
+                  <KeyRound size={13} />
+                  <span>{isLoggingIn ? "Verifying..." : "Unlock Operator Mode"}</span>
+                </button>
+              </form>
+
+              {authError && (
+                <p role="alert" className="text-red-600 text-[11px] font-medium flex items-center gap-1.5">
+                  <AlertCircle size={13} className="shrink-0" />
+                  <span>{authError}</span>
+                </p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── Status & Active Mode Card ───────────────────────────────────────── */}
       <Card>
@@ -259,7 +437,16 @@ export function ExcelImportManager() {
                   <a
                     href="/api/import/export-report"
                     download="SATF_Reconciliation_Report.csv"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-white hover:bg-slate-50 text-slate-700 font-medium border border-slate-200 shadow-xs transition-colors"
+                    onClick={(e) => {
+                      if (!operatorSession.authenticated) {
+                        e.preventDefault();
+                        setActionError("Operator authentication required to download reports containing guest records. Please unlock operator access above.");
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-white hover:bg-slate-50 text-slate-700 font-medium border border-slate-200 shadow-xs transition-colors ${
+                      !operatorSession.authenticated ? "opacity-60 cursor-not-allowed" : ""
+                    }`}
+                    title={!operatorSession.authenticated ? "Unlock operator access to download report" : undefined}
                   >
                     <Download size={13} className="text-blue-600" />
                     <span>Download Audit Report (CSV)</span>

@@ -2,11 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { parseExcelWorkbook } from "@/lib/excel-parser";
+import { authenticateOperatorRequest } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = authenticateOperatorRequest(req);
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { success: false, error: auth.error },
+        { status: auth.status }
+      );
+    }
+
     const contentType = req.headers.get("content-type") || "";
     let buffer: Buffer | null = null;
     let seasonFilter: string | undefined;

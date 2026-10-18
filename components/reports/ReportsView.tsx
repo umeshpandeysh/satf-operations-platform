@@ -27,6 +27,7 @@ import {
   parseSessionSnapshot,
 } from "@/lib/session-store";
 import { cn } from "@/components/ui/utils";
+import { sanitizeCsvCell } from "@/lib/utils";
 
 export interface ReportsViewProps {
   initialTours: Tour[];
@@ -73,20 +74,14 @@ const REPORT_TABS: ReportTab[] = [
   },
 ];
 
-function escapeCsvCell(val: string | number | undefined | null): string {
-  if (val === undefined || val === null) return '""';
-  const str = String(val);
-  return `"${str.replace(/"/g, '""')}"`;
-}
-
 function triggerCsvDownload(
   headers: string[],
   rows: (string | number | undefined | null)[][],
   filename: string
 ) {
   const content = [
-    headers.map(escapeCsvCell).join(","),
-    ...rows.map((row) => row.map(escapeCsvCell).join(",")),
+    headers.map(sanitizeCsvCell).join(","),
+    ...rows.map((row) => row.map(sanitizeCsvCell).join(",")),
   ].join("\r\n");
 
   const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
