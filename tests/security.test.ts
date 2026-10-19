@@ -1344,6 +1344,10 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
       schemaContent.includes("GRANT EXECUTE ON FUNCTION public.satf_mutate_tour_atomic(JSONB, TEXT, TEXT, TIMESTAMPTZ) TO service_role;"),
       "Must grant satf_mutate_tour_atomic exclusively to service_role"
     );
+    assert.ok(
+      schemaContent.includes("SET search_path = public, pg_temp"),
+      "SECURITY DEFINER procedure must lock search_path to prevent path hijacking"
+    );
   });
 
   test("executeAtomicTourMutation routes mutations to rpc/satf_mutate_tour_atomic and fails closed when unconfigured", async () => {

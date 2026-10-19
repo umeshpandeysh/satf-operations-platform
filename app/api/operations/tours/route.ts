@@ -2,11 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateOperatorRequest } from "@/lib/auth";
 import {
   getDatabaseConfigStatus,
-  getPersistentTours,
   createPersistentTour,
 } from "@/lib/operational-store";
 import { validateNewTourForm, createNewTour, type NewTourInput } from "@/lib/operations";
-import { getBaseTours } from "@/lib/server-tours";
+import { getBaseTours, getEffectiveServerTours } from "@/lib/server-tours";
 import type { Tour } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -41,18 +40,12 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const dbResult = await getPersistentTours();
-    if (!dbResult.success) {
-      return NextResponse.json(
-        { success: false, error: dbResult.error || "Failed to query database." },
-        { status: 500 }
-      );
-    }
+    const effectiveTours = await getEffectiveServerTours();
 
     return NextResponse.json({
       success: true,
       configured: true,
-      tours: dbResult.data || [],
+      tours: effectiveTours,
     });
   } catch (err) {
     console.error("GET /api/operations/tours error:", err);
@@ -120,6 +113,15 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+      if (t.departureDate < t.arrivalDate) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Invalid dates: departureDate cannot be earlier than arrivalDate.",
+          },
+          { status: 400 }
+        );
+      }
       tourToCreate = body.tour as Tour;
     } else {
       return NextResponse.json(
@@ -144,7 +146,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const createRes = await createPersistentTour(tourToCreate);
+    const operator = auth.payload?.operator || "coordinator";
+    const createRes = await createPersistentTour(tourToCreate, operator);
     if (!createRes.success) {
       return NextResponse.json(
         { success: false, error: createRes.error, code: createRes.code },

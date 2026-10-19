@@ -103,6 +103,7 @@ CREATE OR REPLACE FUNCTION public.satf_mutate_tour_atomic(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_tour_id TEXT := p_tour->>'id';

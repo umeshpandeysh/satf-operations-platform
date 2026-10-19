@@ -127,7 +127,8 @@ export async function PUT(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const updateRes = await updatePersistentTour(tour as Tour, expectedLastUpdated);
+    const operator = auth.payload?.operator || "coordinator";
+    const updateRes = await updatePersistentTour(tour as Tour, expectedLastUpdated, operator);
     if (!updateRes.success) {
       if (updateRes.conflict) {
         return NextResponse.json(
@@ -212,7 +213,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
         );
       }
 
-      const cancelRes = await cancelPersistentTour(id, reason, body.expectedLastUpdated);
+      const operator = auth.payload?.operator || "coordinator";
+      const cancelRes = await cancelPersistentTour(id, reason, body.expectedLastUpdated, operator);
       if (!cancelRes.success) {
         if (cancelRes.conflict) {
           return NextResponse.json(

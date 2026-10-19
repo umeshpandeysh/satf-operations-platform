@@ -1,4 +1,4 @@
-import { getTourById } from "@/lib/server-tours";
+import { getEffectiveServerTourById } from "@/lib/server-tours";
 import { TourDetailClient } from "@/components/tours/TourDetailClient";
 
 // Ensure tour detail page resolves live dates dynamically at runtime
@@ -10,7 +10,7 @@ interface TourDetailPageProps {
 
 export default async function TourDetailPage({ params }: TourDetailPageProps) {
   const { id } = await params;
-  const tour = getTourById(id);
+  const tour = await getEffectiveServerTourById(id);
 
-  return <TourDetailClient initialTour={tour ?? null} tourId={id} />;
+  return <TourDetailClient initialTour={tour} tourId={id} />;
 }

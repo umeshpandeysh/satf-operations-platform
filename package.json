@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint app components lib",
-    "test": "tsx --test tests/operations.test.ts tests/parser.test.ts tests/security.test.ts"
+    "test": "tsx --test tests/operations.test.ts tests/parser.test.ts tests/security.test.ts",
+    "test:e2e": "tsx --test tests/persistence-e2e.test.ts"
   },
   "dependencies": {
     "lucide-react": "^1.59.0",
