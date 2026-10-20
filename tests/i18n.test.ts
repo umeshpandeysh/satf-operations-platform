@@ -68,7 +68,7 @@ describe("SATF Internationalization (i18n) — Dictionary & Fallback Coverage", 
       "settings.storage_title",
       "issues.title",
       "issues.connection_required_title",
-      // Phase 2 additions:
+      //  additional keys:
       "import_mgr.title",
       "import_mgr.real_data_active",
       "import_mgr.all_seasons",
