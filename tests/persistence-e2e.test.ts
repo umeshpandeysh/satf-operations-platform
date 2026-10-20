@@ -43,7 +43,7 @@ import {
 } from "../app/api/operations/tours/[id]/route";
 import type { Tour } from "../lib/types";
 
-describe("Phase 20: End-to-End Persistence & UI Data Flow Verification", () => {
+describe(": End-to-End Persistence & UI Data Flow Verification", () => {
   const config = getDatabaseConfigStatus();
   if (!config.configured) {
     console.warn("Skipping live database E2E tests: Supabase is not configured.");
