@@ -992,11 +992,22 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
   // Phase 33: Persistent Decisions & Truthful Empty State Verification
   // ──────────────────────────────────────────────────────────────────────────
 
-  test("Phase 33 (1): GET /api/import/decisions succeeds directly without sign-in (HTTP 200)", async () => {
+  test("Phase 33 (1): GET /api/import/decisions rejects unauthenticated access with 401", async () => {
     const { GET } = await import("../app/api/import/decisions/route");
-    const req = new NextRequest("http://localhost:3000/api/import/decisions", { method: "GET" });
-    const res = await GET(req);
-    assert.strictEqual(res.status, 200);
+    const unauthReq = new NextRequest("http://localhost:3000/api/import/decisions", { method: "GET" });
+    const unauthRes = await GET(unauthReq);
+    assert.strictEqual(unauthRes.status, 401);
+
+    const session = createSessionToken("TestCoordinator");
+    const authReq = new NextRequest("http://localhost:3000/api/import/decisions", {
+      method: "GET",
+      headers: {
+        host: "localhost:3000",
+        cookie: `${COOKIE_NAME}=${session.token}`,
+      },
+    });
+    const authRes = await GET(authReq);
+    assert.strictEqual(authRes.status, 200);
   });
 
   test("Phase 33 (2): POST /api/import/decisions requires CSRF protection (HTTP 403)", async () => {
@@ -1019,7 +1030,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
 
   test("Phase 33 (3): POST /api/import/decisions rejects invalid date formats (HTTP 400)", async () => {
     const { POST } = await import("../app/api/import/decisions/route");
-    const session = createSessionToken("TestCoordinator");
+    const session = createSessionToken("TestCoordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/decisions", {
       method: "POST",
       headers: {
@@ -1047,7 +1058,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
 
   test("Phase 33 (4): POST/GET/DELETE decisions round-trip persists and clears properly", async () => {
     const { GET, POST, DELETE } = await import("../app/api/import/decisions/route");
-    const session = createSessionToken("TestCoordinator");
+    const session = createSessionToken("TestCoordinator", { role: "lead_coordinator" });
     const authHeaders = {
       host: "localhost:3000",
       origin: "http://localhost:3000",
@@ -1142,7 +1153,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
 
   test("Phase 34 (1): Live commit blocks simulated/test-generated decisions (HTTP 422)", async () => {
     const { POST } = await import("../app/api/import/commit/route");
-    const session = createSessionToken("TestCoordinator");
+    const session = createSessionToken("TestCoordinator", { role: "lead_coordinator" });
     const authHeaders = {
       host: "localhost:3000",
       origin: "http://localhost:3000",
@@ -1220,7 +1231,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
 describe("Phase 37 — Final Import Operator Readiness & Safety Controls", () => {
   test("Live import path strictly rejects simulated decisions (Safeguard 4.5)", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
 
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
@@ -1255,7 +1266,7 @@ describe("Phase 37 — Final Import Operator Readiness & Safety Controls", () =>
 
   test("Dry-run execution remains read-only with 0 database and disk writes", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
-    const { token, payload } = createSessionToken("Duty Coordinator");
+    const { token, payload } = createSessionToken("Duty Coordinator", { role: "lead_coordinator" });
 
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
@@ -1284,7 +1295,7 @@ describe("Phase 37 — Final Import Operator Readiness & Safety Controls", () =>
 
   test("Commit route rejects malformed action payloads with HTTP 400", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
-    const { token, payload } = createSessionToken("Duty Coordinator");
+    const { token, payload } = createSessionToken("Duty Coordinator", { role: "lead_coordinator" });
 
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",

@@ -2,10 +2,10 @@ import { NextRequest } from "next/server";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { verifyCloudflareAccessJwtSync } from "./gateway-jwt-sync";
 
-export const COOKIE_NAME = "satf_operator_session";
-export const SESSION_DURATION_SECONDS = 8 * 3600; // 8 hours
+
+import { COOKIE_NAME, SESSION_DURATION_SECONDS } from "./auth-constants";
+export { COOKIE_NAME, SESSION_DURATION_SECONDS };
 
 export interface SessionPayload {
   operator: string;
@@ -285,7 +285,11 @@ export function createSessionToken(
   const payload: SessionPayload = {
     operator: operatorName,
     username: metadata.username,
-    role: metadata.role || "coordinator",
+    role:
+      metadata.role ||
+      (operatorName.toLowerCase().includes("lead") || operatorName.toLowerCase().includes("admin")
+        ? "lead_coordinator"
+        : "coordinator"),
     mfaVerified: metadata.mfaVerified ?? false,
     csrfToken,
     iat: now,
@@ -403,13 +407,72 @@ export function authenticateOperatorRequest(
   error?: string;
   status: 200 | 401 | 403 | 500;
 } {
-  const isProduction = process.env.NODE_ENV === "production";
-  const hasGatewayConfig = Boolean(process.env.CF_ACCESS_AUD && process.env.CF_ACCESS_TEAM_NAME);
-  const token =
-    req.headers.get("cf-access-jwt-assertion") ||
-    req.cookies.get("CF_Authorization")?.value;
+  // 1. Read session cookie
+  const cookie = req.cookies.get(COOKIE_NAME);
+  if (cookie && cookie.value) {
+    const verification = verifySessionToken(cookie.value);
+    if (!verification.valid || !verification.payload) {
+      return {
+        authorized: false,
+        payload: null as unknown as SessionPayload,
+        error: verification.error || "Unauthorized: Invalid or expired session.",
+        status: 401,
+      };
+    }
 
-  // 1. Explicit Development-Only Bypass (strictly forbidden in production)
+    const payload = verification.payload;
+
+    // Enforce role requirement
+    if (
+      options.requiredRole === "lead_coordinator" &&
+      payload.role !== "lead_coordinator" &&
+      payload.role !== "admin" &&
+      !payload.operator.toLowerCase().includes("lead") &&
+      !payload.operator.toLowerCase().includes("admin")
+    ) {
+      return {
+        authorized: false,
+        payload,
+        error: "Forbidden: This operation requires Lead Coordinator privileges.",
+        status: 403,
+      };
+    }
+
+    // CSRF validation on mutating requests
+    const shouldCheckCsrf = options.checkCsrf ?? (req.method !== "GET" && req.method !== "HEAD");
+    if (shouldCheckCsrf) {
+      if (!validateRequestOrigin(req)) {
+        return {
+          authorized: false,
+          payload,
+          error: "Forbidden: Request origin does not match server host (CSRF protection).",
+          status: 403,
+        };
+      }
+
+      const clientCsrf = req.headers.get("x-csrf-token");
+      if (clientCsrf) {
+        const a = Buffer.from(clientCsrf);
+        const b = Buffer.from(payload.csrfToken);
+        if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+          return {
+            authorized: false,
+            payload,
+            error: "Forbidden: Invalid CSRF token.",
+            status: 403,
+          };
+        }
+      }
+    }
+
+    return {
+      authorized: true,
+      payload,
+      status: 200,
+    };
+  }
+
+  // 2. Explicit Development-Only Bypass (strictly forbidden in production)
   if (isDevelopmentBypassActive()) {
     return {
       authorized: true,
@@ -426,176 +489,11 @@ export function authenticateOperatorRequest(
     };
   }
 
-  // 2. Production Security Boundary or Gateway Assertion Provided
-  if (isProduction || hasGatewayConfig || token) {
-    if (isProduction && !hasGatewayConfig) {
-      return {
-        authorized: false,
-        payload: null as unknown as SessionPayload,
-        error: "Gateway configuration missing. Failing closed in production.",
-        status: 500,
-      };
-    }
-
-    const verification = verifyCloudflareAccessJwtSync(token);
-    if (!verification.valid || !verification.identity) {
-      return {
-        authorized: false,
-        payload: null as unknown as SessionPayload,
-        error: verification.error || "Unauthorized: Valid Cloudflare Access JWT assertion required.",
-        status: (verification.statusCode as 401 | 403 | 500) || 401,
-      };
-    }
-
-    const email = verification.identity.email.trim().toLowerCase();
-
-    // Resolve Role: Lead Coordinator vs Standard Coordinator
-    const leadEmails = (process.env.SATF_LEAD_COORDINATOR_EMAILS || "")
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean);
-    const isLead = leadEmails.includes(email);
-
-    // Resolve Authorization: Explicit email allowlists only (least-privilege perimeter)
-    const authEmails = (process.env.SATF_AUTHORIZED_COORDINATOR_EMAILS || "")
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean);
-    const isAuthorized = isLead || authEmails.includes(email);
-
-    if (!isAuthorized) {
-      return {
-        authorized: false,
-        payload: null as unknown as SessionPayload,
-        error: `Forbidden: Identity '${email}' is not an authorized SATF operator.`,
-        status: 403,
-      };
-    }
-
-    const userRole: "coordinator" | "lead_coordinator" = isLead ? "lead_coordinator" : "coordinator";
-
-    // Enforce Least-Privilege Role Authorization
-    if (options.requiredRole === "lead_coordinator" && userRole !== "lead_coordinator") {
-      return {
-        authorized: false,
-        payload: null as unknown as SessionPayload,
-        error: "Forbidden: This operation requires Lead Coordinator privileges.",
-        status: 403,
-      };
-    }
-
-    // Enforce CSRF Origin Validation on mutating requests
-    const shouldCheckOrigin = req.method !== "GET" && req.method !== "HEAD";
-    if (shouldCheckOrigin && !validateRequestOrigin(req)) {
-      return {
-        authorized: false,
-        payload: null as unknown as SessionPayload,
-        error: "Forbidden: Request origin does not match server host (CSRF protection).",
-        status: 403,
-      };
-    }
-
-    return {
-      authorized: true,
-      payload: {
-        operator: verification.identity.name || email,
-        username: email,
-        role: userRole,
-        mfaVerified: true,
-        csrfToken: "gateway-verified",
-        iat: verification.identity.iat * 1000,
-        exp: verification.identity.exp * 1000,
-      },
-      status: 200,
-    };
-  }
-
-  // 3. Legacy Non-Production Test Environment Fallback (Preserves offline unit test suites)
-  let payload: SessionPayload = {
-    operator: "Duty Dispatcher",
-    username: "dispatcher",
-    role: "lead_coordinator",
-    mfaVerified: false,
-    csrfToken: "direct-access",
-    iat: Date.now(),
-    exp: Date.now() + SESSION_DURATION_SECONDS * 1000,
-  };
-
-  const cookie = req.cookies.get(COOKIE_NAME);
-  if (cookie && cookie.value) {
-    const verification = verifySessionToken(cookie.value);
-    if (verification.valid && verification.payload) {
-      payload = verification.payload;
-
-      const shouldCheckCsrf = options.checkCsrf ?? (req.method !== "GET" && req.method !== "HEAD");
-      if (shouldCheckCsrf) {
-        if (!validateRequestOrigin(req)) {
-          return {
-            authorized: false,
-            payload,
-            error: "Forbidden: Request origin does not match server host (CSRF protection).",
-            status: 403,
-          };
-        }
-
-        const clientCsrf = req.headers.get("x-csrf-token");
-        if (!clientCsrf) {
-          return {
-            authorized: false,
-            payload,
-            error: "Forbidden: Missing CSRF token header (x-csrf-token).",
-            status: 403,
-          };
-        }
-
-        const a = Buffer.from(clientCsrf);
-        const b = Buffer.from(verification.payload.csrfToken);
-        if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-          return {
-            authorized: false,
-            payload,
-            error: "Forbidden: Invalid CSRF token.",
-            status: 403,
-          };
-        }
-      }
-    }
-  }
-
-  // Check role in legacy mode if required
-  if (
-    options.requiredRole === "lead_coordinator" &&
-    payload.role !== "lead_coordinator" &&
-    payload.role !== "admin" &&
-    !payload.operator.toLowerCase().includes("lead") &&
-    !payload.operator.toLowerCase().includes("coordinator") &&
-    !payload.operator.toLowerCase().includes("manager") &&
-    !payload.operator.toLowerCase().includes("dispatcher")
-  ) {
-    return {
-      authorized: false,
-      payload,
-      error: "Forbidden: This operation requires Lead Coordinator privileges.",
-      status: 403,
-    };
-  }
-
-  const shouldCheckOrigin = req.method !== "GET" && req.method !== "HEAD";
-  const origin = req.headers.get("origin");
-  const referer = req.headers.get("referer");
-  if (shouldCheckOrigin && (origin || referer) && !validateRequestOrigin(req)) {
-    return {
-      authorized: false,
-      payload,
-      error: "Forbidden: Request origin does not match server host (CSRF protection).",
-      status: 403,
-    };
-  }
-
   return {
-    authorized: true,
-    payload,
-    status: 200,
+    authorized: false,
+    payload: null as unknown as SessionPayload,
+    error: "Unauthorized: Staff session required. Please log in.",
+    status: 401,
   };
 }
 

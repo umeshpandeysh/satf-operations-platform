@@ -114,7 +114,7 @@ describe("Phase 20: End-to-End Persistence & UI Data Flow Verification", () => {
   const dummyBookingRef = "SATF-P20-" + Math.floor(Math.random() * 90000 + 10000);
   trackedTours.push({ id: dummyTourId, bookingRef: dummyBookingRef });
 
-  const session1 = createSessionToken("Coordinator-1");
+  const session1 = createSessionToken("Coordinator-1", { role: "lead_coordinator" });
   const session2 = createSessionToken("Coordinator-2");
 
   const headersSession1: Record<string, string> = {
@@ -356,11 +356,17 @@ describe("Phase 20: End-to-End Persistence & UI Data Flow Verification", () => {
 
   test("6. Security & Failure Validation", async () => {
     // 6A. Unauthenticated request -> HTTP 401
-    const unauthReq = new NextRequest(`http://localhost:3000/api/operations/tours/${dummyTourId}`, {
-      method: "GET",
-    });
-    const unauthRes = await getOperationsTourByIdRoute(unauthReq, { params: Promise.resolve({ id: dummyTourId }) });
-    assert.strictEqual(unauthRes.status, 401);
+    const origBypass = process.env.SATF_DEV_AUTH_BYPASS;
+    delete process.env.SATF_DEV_AUTH_BYPASS;
+    try {
+      const unauthReq = new NextRequest(`http://localhost:3000/api/operations/tours/${dummyTourId}`, {
+        method: "GET",
+      });
+      const unauthRes = await getOperationsTourByIdRoute(unauthReq, { params: Promise.resolve({ id: dummyTourId }) });
+      assert.strictEqual(unauthRes.status, 401);
+    } finally {
+      if (origBypass !== undefined) process.env.SATF_DEV_AUTH_BYPASS = origBypass;
+    }
 
     // 6B. Invalid CSRF token -> HTTP 403
     const badCsrfHeaders = { ...headersSession1, "x-csrf-token": "tampered-csrf-token" };

@@ -13,16 +13,6 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    if (process.env.NODE_ENV === "production") {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Legacy passphrase authentication is disabled in production. Access is governed exclusively by Cloudflare Zero Trust.",
-        },
-        { status: 403 }
-      );
-    }
-
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "127.0.0.1";
     const rateCheck = checkRateLimit(ip);
 

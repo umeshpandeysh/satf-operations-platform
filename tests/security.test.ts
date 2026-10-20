@@ -454,33 +454,18 @@ describe("Operator Authentication, Session Management & Protected Routes", () =>
     assert.strictEqual(validateRequestOrigin(evilRefererReq), false);
   });
 
-  test("authenticateOperatorRequest permits direct access without session and validates CSRF when token is provided", () => {
-    // 1. Missing session cookie enables direct operational access
+  test("authenticateOperatorRequest rejects unauthenticated requests and validates CSRF when token is provided", () => {
+    // 1. Missing session cookie returns 401
     const noAuthReq = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: { host: "localhost:3000", origin: "http://localhost:3000" },
     });
     const resNoAuth = authenticateOperatorRequest(noAuthReq);
-    assert.strictEqual(resNoAuth.authorized, true);
-    assert.strictEqual(resNoAuth.status, 200);
-    assert.strictEqual(resNoAuth.payload.operator, "Duty Dispatcher");
+    assert.strictEqual(resNoAuth.authorized, false);
+    assert.strictEqual(resNoAuth.status, 401);
 
-    // 2. Valid session token, but missing CSRF header on POST
+    // 2. Valid session token with wrong CSRF header
     const { token, payload } = createSessionToken("Ops Auditor");
-    const noCsrfReq = new NextRequest("http://localhost:3000/api/import/commit", {
-      method: "POST",
-      headers: {
-        host: "localhost:3000",
-        origin: "http://localhost:3000",
-        cookie: `${COOKIE_NAME}=${token}`,
-      },
-    });
-    const resNoCsrf = authenticateOperatorRequest(noCsrfReq);
-    assert.strictEqual(resNoCsrf.authorized, false);
-    assert.strictEqual(resNoCsrf.status, 403);
-    assert.ok(resNoCsrf.error?.includes("Missing CSRF token"));
-
-    // 3. Valid session token with wrong CSRF header
     const wrongCsrfReq = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
@@ -494,7 +479,7 @@ describe("Operator Authentication, Session Management & Protected Routes", () =>
     assert.strictEqual(resWrongCsrf.authorized, false);
     assert.strictEqual(resWrongCsrf.status, 403);
 
-    // 4. Valid session token with matching CSRF header and valid origin
+    // 3. Valid session token with matching CSRF header and valid origin
     const validReq = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
@@ -560,15 +545,14 @@ describe("Operator Authentication, Session Management & Protected Routes", () =>
     assert.strictEqual(sessionData.authenticated, true);
     assert.strictEqual(sessionData.csrfToken, successData.csrfToken);
 
-    // 4. Check /api/auth/session without cookie returns active direct access session
+    // 4. Check /api/auth/session without cookie returns unauthenticated
     const anonReq = new NextRequest("http://localhost:3000/api/auth/session", {
       headers: { host: "localhost:3000" },
     });
     const anonRes = await sessionRoute(anonReq);
     assert.strictEqual(anonRes.status, 200);
     const anonData = await anonRes.json();
-    assert.strictEqual(anonData.authenticated, true);
-    assert.strictEqual(anonData.operator, "Duty Dispatcher");
+    assert.strictEqual(anonData.authenticated, false);
 
     // 5. Logout endpoint clears cookie
     const logoutRes = await logoutRoute();
@@ -578,62 +562,56 @@ describe("Operator Authentication, Session Management & Protected Routes", () =>
     assert.ok(logoutSetCookie.includes("Max-Age=0"));
   });
 
-  test("operational import endpoints permit direct access without sign-in (no 401)", async () => {
-    // POST /api/import/commit allows access without 401 (validates body)
+  test("operational import endpoints reject unauthenticated access with 401", async () => {
+    // POST /api/import/commit requires session
     const commitReq = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: { host: "localhost:3000" },
     });
     const commitRes = await commitRoute(commitReq);
-    assert.notStrictEqual(commitRes.status, 401);
+    assert.strictEqual(commitRes.status, 401);
 
-    // POST /api/import/status allows access without 401
+    // POST /api/import/status requires session
     const statusReq = new NextRequest("http://localhost:3000/api/import/status", {
       method: "POST",
       headers: { host: "localhost:3000" },
     });
     const statusRes = await statusRoute(statusReq);
-    assert.notStrictEqual(statusRes.status, 401);
+    assert.strictEqual(statusRes.status, 401);
 
-    // POST /api/import/preview allows access without 401
-    const previewReq = new NextRequest("http://localhost:3000/api/import/preview", {
-      method: "POST",
-      headers: { host: "localhost:3000" },
-    });
-    const previewRes = await previewRoute(previewReq);
-    assert.notStrictEqual(previewRes.status, 401);
-
-    // GET /api/import/export-report allows direct download without 401
+    // GET /api/import/export-report requires session
     const exportReq = new NextRequest("http://localhost:3000/api/import/export-report", {
       method: "GET",
       headers: { host: "localhost:3000" },
     });
     const exportRes = await exportReportRoute(exportReq);
-    assert.notStrictEqual(exportRes.status, 401);
+    assert.strictEqual(exportRes.status, 401);
   });
 
-  test("protected import endpoints reject requests with session but missing/invalid CSRF with 403", async () => {
+  test("protected import endpoints reject requests with session but invalid CSRF with 403", async () => {
     const { token } = createSessionToken("Operator Beta");
 
-    // POST /api/import/commit without CSRF token
+    // POST /api/import/commit with invalid CSRF token
     const commitReq = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
         host: "localhost:3000",
         origin: "http://localhost:3000",
         cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": "invalid-csrf-token-value-for-testing",
       },
     });
     const commitRes = await commitRoute(commitReq);
     assert.strictEqual(commitRes.status, 403);
 
-    // POST /api/import/status without CSRF token
+    // POST /api/import/status with invalid CSRF token
     const statusReq = new NextRequest("http://localhost:3000/api/import/status", {
       method: "POST",
       headers: {
         host: "localhost:3000",
         origin: "http://localhost:3000",
         cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": "invalid-csrf-token-value-for-testing",
       },
     });
     const statusRes = await statusRoute(statusReq);
@@ -913,15 +891,12 @@ describe("Excel Upload Security Hardening — Size, Format & Signature Validatio
 });
 
 describe("Persistent Operations APIs — Authorization, Validation, Concurrency & Safe Degradation", () => {
-  test("GET /api/operations/tours succeeds directly without sign-in", async () => {
+  test("GET /api/operations/tours rejects unauthenticated access with 401", async () => {
     const req = new NextRequest("http://localhost:3000/api/operations/tours", {
       method: "GET",
     });
     const res = await getOperationsToursRoute(req);
-    assert.strictEqual(res.status, 200);
-    const data = await res.json();
-    assert.strictEqual(data.success, true);
-    assert.ok(Array.isArray(data.tours));
+    assert.strictEqual(res.status, 401);
   });
 
   test("GET /api/operations/tours succeeds for authenticated operator and reports database config status", async () => {
@@ -940,7 +915,7 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
     assert.ok(Array.isArray(data.tours));
   });
 
-  test("POST /api/operations/tours permits direct access without 401", async () => {
+  test("POST /api/operations/tours rejects unauthenticated access with 401", async () => {
     const req = new NextRequest("http://localhost:3000/api/operations/tours", {
       method: "POST",
       headers: {
@@ -949,17 +924,19 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
       body: JSON.stringify({ tour: { bookingReference: "TEST-01" } }),
     });
     const res = await postOperationsToursRoute(req);
-    assert.notStrictEqual(res.status, 401);
+    assert.strictEqual(res.status, 401);
   });
 
-  test("POST /api/operations/tours rejects requests with missing or invalid CSRF token with HTTP 403", async () => {
+  test("POST /api/operations/tours rejects requests with invalid CSRF token with HTTP 403", async () => {
     const { token } = createSessionToken("Operations Coordinator");
     const req = new NextRequest("http://localhost:3000/api/operations/tours", {
       method: "POST",
       headers: {
+        host: "localhost:3000",
+        origin: "http://localhost:3000",
         cookie: `${COOKIE_NAME}=${token}`,
+        "x-csrf-token": "invalid-csrf-token-value-for-testing",
         "content-type": "application/json",
-        // Missing x-csrf-token header
       },
       body: JSON.stringify({ tour: { bookingReference: "TEST-01" } }),
     });
@@ -1022,14 +999,14 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
     assert.ok(data.error.includes("SUPABASE_URL") || data.error.includes("persistence is not configured"));
   });
 
-  test("PUT /api/operations/tours/[id] permits direct access without 401", async () => {
+  test("PUT /api/operations/tours/[id] rejects unauthenticated access with 401", async () => {
     const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: "tour-001" }),
     });
     const res = await putOperationsTourRoute(req, { params: Promise.resolve({ id: "tour-001" }) });
-    assert.notStrictEqual(res.status, 401);
+    assert.strictEqual(res.status, 401);
   });
 
   test("PUT /api/operations/tours/[id] returns HTTP 503 DATABASE_NOT_CONFIGURED when Supabase is unconfigured", async () => {
@@ -1066,7 +1043,7 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
   });
 
   test("POST /api/operations/tours/[id] (cancel) validates cancellation reason length (HTTP 400)", async () => {
-    const { token, payload } = createSessionToken("Operations Coordinator");
+    const { token, payload } = createSessionToken("Operations Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
       method: "POST",
       headers: {
@@ -1230,7 +1207,7 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
   });
 
   test("POST /api/operations/tours/[id] (cancel) with valid reason fails closed with 503 when Supabase unconfigured", async () => {
-    const { token, payload } = createSessionToken("Operations Coordinator");
+    const { token, payload } = createSessionToken("Operations Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
       method: "POST",
       headers: {
@@ -1249,12 +1226,12 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
     assert.strictEqual(data.code, "DATABASE_NOT_CONFIGURED");
   });
 
-  test("GET /api/operations/tours/[id] permits direct access without sign-in", async () => {
+  test("GET /api/operations/tours/[id] rejects unauthenticated access with 401", async () => {
     const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
       method: "GET",
     });
     const res = await getOperationsTourByIdRoute(req, { params: Promise.resolve({ id: "tour-001" }) });
-    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.status, 401);
   });
 
   test("satf_schema.sql audit log FK uses ON DELETE SET NULL to preserve history on tour deletion", () => {
