@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -13,9 +13,13 @@ import {
   Settings,
   Menu,
   X,
+  KeyRound,
+  ShieldCheck,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useLanguage } from "@/lib/i18n";
+import { StaffAuthModal } from "@/components/auth/StaffAuthModal";
 
 export interface NavItem {
   id: string;
@@ -89,12 +93,59 @@ export function TopNavBar() {
   const pathname = usePathname();
   const { language, setLanguage, t } = useLanguage();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [session, setSession] = useState<{
+    authenticated: boolean;
+    operator?: string;
+    role?: string;
+  }>({ authenticated: false });
 
   // Close menus on path navigation
   const [prevPathname, setPrevPathname] = useState(pathname);
   if (prevPathname !== pathname) {
     setPrevPathname(pathname);
     setMobileMenuOpen(false);
+    setUserMenuOpen(false);
+  }
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((data) => {
+        if (mounted && data?.authenticated) {
+          setSession({
+            authenticated: true,
+            operator: data.operator,
+            role: data.role,
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  function handleAuthSuccess(info: { operator: string; role?: string }) {
+    setSession({ authenticated: true, operator: info.operator, role: info.role });
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("satf-session-change", { detail: info }));
+      window.location.reload();
+    }
+  }
+
+  async function handleLogout() {
+    setUserMenuOpen(false);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {}
+    setSession({ authenticated: false });
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("satf-session-change", { detail: { authenticated: false } }));
+      window.location.reload();
+    }
   }
 
   return (
@@ -200,6 +251,48 @@ export function TopNavBar() {
                 </button>
               </div>
 
+              {/* Staff Access / Operator Session Badge */}
+              {session.authenticated ? (
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-[11px] sm:text-xs font-semibold hover:bg-emerald-100/90 transition-colors cursor-pointer"
+                    title={session.role === "lead_coordinator" ? "Lead Coordinator" : "Duty Coordinator"}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <ShieldCheck size={13} className="text-emerald-700" />
+                    <span className="hidden sm:inline max-w-[120px] truncate">{session.operator}</span>
+                  </button>
+                  {userMenuOpen && (
+                    <div className="absolute right-0 mt-1.5 w-44 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-50 animate-in fade-in zoom-in-95 duration-100">
+                      <div className="px-3 py-1.5 border-b border-slate-100">
+                        <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">{t("auth.authenticated_as")}</p>
+                        <p className="text-xs font-bold text-slate-800 truncate">{session.operator}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <LogOut size={13} />
+                        <span>{t("nav.sign_out")}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAuthModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-lg border border-slate-200/90 text-slate-600 hover:text-[#172d43] hover:border-slate-300 hover:bg-slate-50 text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer shrink-0"
+                  aria-label="Staff Access"
+                >
+                  <KeyRound size={13} className="text-[#244d70]" />
+                  <span className="hidden sm:inline">{language === "ja" ? "スタッフ認証" : "Staff Access"}</span>
+                </button>
+              )}
+
               {/* Mobile Menu Hamburger Toggle */}
               <button
                 type="button"
@@ -242,9 +335,47 @@ export function TopNavBar() {
                 </Link>
               );
             })}
+
+            {/* Mobile Auth Action */}
+            <div className="pt-2 border-t border-slate-100">
+              {session.authenticated ? (
+                <div className="flex items-center justify-between px-3 py-2 bg-emerald-50 rounded-lg text-xs">
+                  <div className="flex items-center gap-2 text-emerald-800 font-semibold truncate">
+                    <ShieldCheck size={14} className="shrink-0" />
+                    <span className="truncate">{session.operator}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="text-red-600 font-bold hover:underline cursor-pointer shrink-0 ml-2"
+                  >
+                    {t("nav.sign_out")}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    setAuthModalOpen(true);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-[#244d70] text-white text-xs font-bold hover:bg-[#1a3852] transition-colors cursor-pointer"
+                >
+                  <KeyRound size={14} />
+                  <span>{language === "ja" ? "スタッフ認証" : "Staff Access"}</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </header>
+
+      {/* Staff Authentication Modal Dialog */}
+      <StaffAuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        onSuccess={handleAuthSuccess}
+      />
     </>
   );
 }

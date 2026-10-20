@@ -90,6 +90,54 @@ export const TRANSLATIONS: TranslationDictionary = {
     en: "Close Menu",
     ja: "メニューを閉じる",
   },
+  "auth.modal_title": {
+    en: "Coordinator Authentication",
+    ja: "運行管理スタッフ認証",
+  },
+  "auth.modal_desc": {
+    en: "Enter your operator passphrase or coordinator credentials to access dispatch mutations and tour management.",
+    ja: "運行管理およびツアー配車を操作するためのパスフレーズまたは認証情報を入力してください。",
+  },
+  "auth.passphrase_label": {
+    en: "Operator Passphrase",
+    ja: "オペレーター・パスフレーズ",
+  },
+  "auth.passphrase_placeholder": {
+    en: "Enter secret passphrase...",
+    ja: "パスフレーズを入力...",
+  },
+  "auth.username_label": {
+    en: "Coordinator Username (Optional)",
+    ja: "コーディネーター・ユーザー名 (任意)",
+  },
+  "auth.username_placeholder": {
+    en: "Leave blank for general duty passphrase",
+    ja: "共通パスフレーズの場合は空欄",
+  },
+  "auth.mfa_label": {
+    en: "MFA Code (If enabled)",
+    ja: "MFA認証コード (有効な場合)",
+  },
+  "auth.mfa_placeholder": {
+    en: "6-digit TOTP code",
+    ja: "6桁のワンタイムコード",
+  },
+  "auth.submit": {
+    en: "Authenticate",
+    ja: "認証する",
+  },
+  "auth.authenticating": {
+    en: "Authenticating...",
+    ja: "認証中...",
+  },
+  "auth.authenticated_as": {
+    en: "Active Operator",
+    ja: "担当コーディネーター",
+  },
+  "auth.cancel": {
+    en: "Cancel",
+    ja: "キャンセル",
+  },
 
   // Homepage / Hero / Quotes
   "hero.badge": {
