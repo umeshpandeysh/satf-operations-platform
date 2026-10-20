@@ -1321,9 +1321,11 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     assert.strictEqual(merged.hotels[0]?.confirmationNumber, "CONF-AGRA-101");
   });
 
-  test(" Regression: migration script phase25_repeat_reference_safe.sql syntax and safety verification", () => {
-    const migrationPath = path.join(__dirname, "..", "supabase", "phase25_repeat_reference_safe.sql");
-    assert.ok(fs.existsSync(migrationPath), "Migration file phase25_repeat_reference_safe.sql must exist");
+  test(" Regression: migration script repeat_reference_safe.sql syntax and safety verification", () => {
+    const migrationPath = fs.existsSync(path.join(__dirname, "..", "supabase", "repeat_reference_safe.sql"))
+      ? path.join(__dirname, "..", "supabase", "repeat_reference_safe.sql")
+      : path.join(__dirname, "..", "supabase", "phase25_repeat_reference_safe.sql");
+    assert.ok(fs.existsSync(migrationPath), "Migration file repeat_reference_safe.sql must exist");
 
     const sqlContent = fs.readFileSync(migrationPath, "utf-8");
 

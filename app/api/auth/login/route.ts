@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  verifyPassphrase,
+  getPassphraseRole,
   verifyCoordinatorCredentials,
   createSessionToken,
   recordFailedAttempt,
@@ -61,8 +61,8 @@ export async function POST(req: NextRequest) {
       sessionRole = coordAuth.user?.role;
       mfaVerified = Boolean(coordAuth.user?.totpSecret);
     } else {
-      const isValid = verifyPassphrase(passphrase);
-      if (!isValid) {
+      const verifiedRole = getPassphraseRole(passphrase);
+      if (!verifiedRole) {
         const record = recordFailedAttempt(ip);
         return NextResponse.json(
           {
@@ -75,6 +75,10 @@ export async function POST(req: NextRequest) {
           { status: 401 }
         );
       }
+      sessionRole = verifiedRole;
+      sessionOperator = verifiedRole === "lead_coordinator"
+        ? (operatorName || "Lead Coordinator")
+        : (operatorName || "Duty Coordinator");
     }
 
     // Passphrase valid -> reset attempts and issue session

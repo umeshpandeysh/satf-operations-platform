@@ -264,6 +264,20 @@ async function executeSupabaseQuery<T>(
   }
 }
 
+// ─── High-Performance Server-Side Cache for Persistent Operational Tours ───
+
+interface PersistentToursCache {
+  data: Tour[];
+  timestamp: number;
+}
+
+let persistentToursCache: PersistentToursCache | null = null;
+const PERSISTENT_TOURS_CACHE_TTL_MS = 60 * 1000; // 60-second TTL
+
+export function invalidatePersistentToursCache(): void {
+  persistentToursCache = null;
+}
+
 /**
  * Retrieve all persistent operational tours from Supabase.
  */
@@ -296,6 +310,34 @@ export async function getPersistentTours(referenceDate: string = getIndiaTodayIS
   }
 
   return { success: true, data: allRows.map((r) => rowToTour(r, referenceDate)) };
+}
+
+/**
+ * Retrieve persistent operational tours with 60s in-memory caching.
+ * Cache is immediately invalidated upon any mutation (create, update, cancel, commit).
+ */
+export async function getCachedPersistentTours(
+  referenceDate: string = getIndiaTodayISO()
+): Promise<PersistenceResult<Tour[]>> {
+  const now = Date.now();
+  if (persistentToursCache && now - persistentToursCache.timestamp < PERSISTENT_TOURS_CACHE_TTL_MS) {
+    return {
+      success: true,
+      data: persistentToursCache.data.map((t) => ({
+        ...t,
+        status: computeTourLifecycleStatus(t, referenceDate),
+      })),
+    };
+  }
+
+  const res = await getPersistentTours(referenceDate);
+  if (res.success && res.data) {
+    persistentToursCache = {
+      data: res.data,
+      timestamp: now,
+    };
+  }
+  return res;
 }
 
 /**
@@ -468,6 +510,7 @@ export async function executeAtomicTourMutation(
   }
 
   const mutatedTour = rowToTour(res.data);
+  invalidatePersistentToursCache();
   return { success: true, data: mutatedTour };
 }
 
@@ -683,5 +726,6 @@ export async function batchUpsertPersistentTours(
     }
   }
 
+  invalidatePersistentToursCache();
   return summary;
 }

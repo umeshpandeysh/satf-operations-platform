@@ -13,6 +13,7 @@ export interface SessionPayload {
   role?: string;
   mfaVerified?: boolean;
   csrfToken: string;
+  jti?: string;
   iat: number;
   exp: number;
 }
@@ -31,10 +32,9 @@ export interface CoordinatorUser {
 
 /**
  * Retrieve operator passphrase from server-side environment only.
- * Fails closed if neither SATF_OPERATOR_PASSPHRASE nor SATF_ADMIN_PASSPHRASE is configured.
  */
 export function getOperatorPassphrase(): string | null {
-  const envPass = process.env.SATF_OPERATOR_PASSPHRASE || process.env.SATF_ADMIN_PASSPHRASE;
+  const envPass = process.env.SATF_OPERATOR_PASSPHRASE;
   if (envPass && envPass.trim()) {
     return envPass.trim();
   }
@@ -42,12 +42,54 @@ export function getOperatorPassphrase(): string | null {
 }
 
 /**
+ * Retrieve admin passphrase from server-side environment only.
+ */
+export function getAdminPassphrase(): string | null {
+  const envPass = process.env.SATF_ADMIN_PASSPHRASE;
+  if (envPass && envPass.trim()) {
+    return envPass.trim();
+  }
+  return null;
+}
+
+/**
+ * Determine verified role from passphrase without trusting client claims.
+ * Matches admin passphrase first (lead_coordinator), then operator passphrase (coordinator).
+ */
+export function getPassphraseRole(input: string): "lead_coordinator" | "coordinator" | null {
+  if (typeof input !== "string" || !input) return null;
+
+  const adminPass = getAdminPassphrase();
+  if (adminPass) {
+    const a = crypto.createHash("sha256").update(input).digest();
+    const b = crypto.createHash("sha256").update(adminPass).digest();
+    if (crypto.timingSafeEqual(a, b)) return "lead_coordinator";
+  }
+
+  const opPass = getOperatorPassphrase();
+  if (opPass) {
+    const a = crypto.createHash("sha256").update(input).digest();
+    const b = crypto.createHash("sha256").update(opPass).digest();
+    if (crypto.timingSafeEqual(a, b)) return "coordinator";
+  }
+
+  return null;
+}
+
+/**
  * Retrieve or generate persistent server-side HMAC session secret.
- * Stored in git-ignored data/ directory if environment variable is unset.
+ * In production, strictly requires SATF_SESSION_SECRET >= 32 chars and fails closed if missing.
  */
 export function getSessionSecret(): string {
-  if (process.env.SATF_SESSION_SECRET && process.env.SATF_SESSION_SECRET.trim()) {
-    return process.env.SATF_SESSION_SECRET.trim();
+  const envSecret = process.env.SATF_SESSION_SECRET?.trim();
+  if (envSecret && envSecret.length >= 32) {
+    return envSecret;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "FATAL SECURITY CONFIGURATION ERROR: SATF_SESSION_SECRET must be configured with at least 32 characters in production. Failing closed."
+    );
   }
 
   const secretFile = path.resolve(process.cwd(), "data/.session_secret");
@@ -62,25 +104,17 @@ export function getSessionSecret(): string {
     fs.writeFileSync(secretFile, generated, { encoding: "utf-8", mode: 0o600 });
     return generated;
   } catch {
-    return "satf-ephemeral-session-secret-fallback-minimum-32-chars-long";
+    if (process.env.NODE_ENV === "test") {
+      return "satf-test-session-secret-for-local-unit-tests-only-min32";
+    }
+    throw new Error("Unable to establish secure session secret. Please configure SATF_SESSION_SECRET.");
   }
 }
 
 // ─── Constant-Time Passphrase Verification ───────────────────────────────────
 
 export function verifyPassphrase(input: string): boolean {
-  if (typeof input !== "string" || !input) return false;
-  const expected = getOperatorPassphrase();
-  if (!expected) {
-    // Fail closed: No operator passphrase configured in environment
-    return false;
-  }
-
-  // Hash both with SHA-256 to ensure identical buffer length for timingSafeEqual
-  const a = crypto.createHash("sha256").update(input).digest();
-  const b = crypto.createHash("sha256").update(expected).digest();
-
-  return crypto.timingSafeEqual(a, b);
+  return getPassphraseRole(input) !== null;
 }
 
 // ─── Multi-Factor Authentication (RFC 6238 TOTP) ─────────────────────────────
@@ -271,27 +305,99 @@ export function resetRateLimit(identifier: string): void {
   rateLimitMap.delete(identifier);
 }
 
+// ─── Cross-Instance Session Revocation Store ────────────────────────────────
+
+interface RevokedSessionRecord {
+  jti: string;
+  exp: number;
+  revokedAt: number;
+}
+
+const inMemoryRevokedTokens = new Set<string>();
+
+function getRevocationFilePath(): string {
+  if (process.env.NODE_ENV === "production") {
+    return path.join("/tmp", "satf_revoked_sessions.json");
+  }
+  return path.resolve(process.cwd(), "data", ".revoked_sessions.json");
+}
+
+function loadRevokedTokens(): Set<string> {
+  const set = new Set<string>(inMemoryRevokedTokens);
+  try {
+    const filePath = getRevocationFilePath();
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, "utf-8");
+      const list = JSON.parse(raw) as RevokedSessionRecord[];
+      const now = Date.now();
+      for (const item of list) {
+        if (item && item.exp > now) {
+          set.add(item.jti);
+        }
+      }
+    }
+  } catch {
+    // Fall back to in-memory set if filesystem is inaccessible
+  }
+  return set;
+}
+
+export function revokeSession(jti: string, exp: number = Date.now() + SESSION_DURATION_SECONDS * 1000): void {
+  if (!jti) return;
+  inMemoryRevokedTokens.add(jti);
+  try {
+    const filePath = getRevocationFilePath();
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    let list: RevokedSessionRecord[] = [];
+    if (fs.existsSync(filePath)) {
+      try {
+        list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      } catch {}
+    }
+    const now = Date.now();
+    list = list.filter((item) => item.exp > now);
+    list.push({ jti, exp, revokedAt: now });
+    fs.writeFileSync(filePath, JSON.stringify(list), { encoding: "utf-8", mode: 0o600 });
+  } catch {
+    // If disk write fails in restricted environment, in-memory set is maintained
+  }
+}
+
+export function isSessionRevoked(jti: string): boolean {
+  if (!jti) return false;
+  if (inMemoryRevokedTokens.has(jti)) return true;
+  const set = loadRevokedTokens();
+  return set.has(jti);
+}
+
 // ─── Session Token Signing & Verification ────────────────────────────────────
 
 export function createSessionToken(
   operatorName = "Duty Operator",
-  metadata: { username?: string; role?: string; mfaVerified?: boolean } = {}
+  metadata: { username?: string; role?: string; mfaVerified?: boolean; jti?: string } = {}
 ): {
   token: string;
   payload: SessionPayload;
 } {
   const now = Date.now();
   const csrfToken = crypto.randomBytes(24).toString("hex");
+  const jti = metadata.jti || crypto.randomBytes(16).toString("hex");
+  const role =
+    metadata.role ||
+    (operatorName.toLowerCase().includes("lead") || operatorName.toLowerCase().includes("admin")
+      ? "lead_coordinator"
+      : "coordinator");
+
   const payload: SessionPayload = {
     operator: operatorName,
     username: metadata.username,
-    role:
-      metadata.role ||
-      (operatorName.toLowerCase().includes("lead") || operatorName.toLowerCase().includes("admin")
-        ? "lead_coordinator"
-        : "coordinator"),
+    role,
     mfaVerified: metadata.mfaVerified ?? false,
     csrfToken,
+    jti,
     iat: now,
     exp: now + SESSION_DURATION_SECONDS * 1000,
   };
@@ -341,6 +447,11 @@ export function verifySessionToken(token: string): {
 
     if (!payload.csrfToken) {
       return { valid: false, error: "Session is missing CSRF protection token." };
+    }
+
+    // Check revocation
+    if (payload.jti && isSessionRevoked(payload.jti)) {
+      return { valid: false, error: "Session has been revoked. Please log in again." };
     }
 
     return { valid: true, payload };
@@ -422,13 +533,11 @@ export function authenticateOperatorRequest(
 
     const payload = verification.payload;
 
-    // Enforce role requirement
+    // Enforce role requirement strictly from verified session role
     if (
       options.requiredRole === "lead_coordinator" &&
       payload.role !== "lead_coordinator" &&
-      payload.role !== "admin" &&
-      !payload.operator.toLowerCase().includes("lead") &&
-      !payload.operator.toLowerCase().includes("admin")
+      payload.role !== "admin"
     ) {
       return {
         authorized: false,
