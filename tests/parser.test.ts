@@ -901,7 +901,7 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     assert.strictEqual(tourWithEnrichedFields.sourceRecordId, "FEB 2026:R15:1250001");
   });
 
-  test("Phase 25: tourToRow and rowToTour round-trip preserves all Phase 24 fields via provenance JSONB", () => {
+  test(": tourToRow and rowToTour round-trip preserves all  fields via provenance JSONB", () => {
     const originalTour: Tour = {
       id: "satf-1250001-feb-2026-r15",
       bookingReference: "1250001",
@@ -1008,7 +1008,7 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     assert.strictEqual(roundTripped.assignments?.[0].name, "Ramesh Sharma");
   });
 
-  test("Phase 25: getCanonicalTourById prioritizes exact ID and sourceRecordId over bookingReference", () => {
+  test(": getCanonicalTourById prioritizes exact ID and sourceRecordId over bookingReference", () => {
     // Set up a mock canonical dataset with two distinct tours sharing the same booking reference
     const tour1: Tour = {
       id: "satf-1253601-oct-23-r21",
@@ -1104,7 +1104,7 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     clearCanonicalDataset();
   });
 
-  test("Phase 25: compareIncomingWithExisting matches by exact id and sourceRecordId without false conflicts", () => {
+  test(": compareIncomingWithExisting matches by exact id and sourceRecordId without false conflicts", () => {
     const existingTourA: Tour = {
       id: "satf-1222824-oct-23-r21",
       bookingReference: "1222824",
@@ -1169,7 +1169,7 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     assert.strictEqual(mergedGuide?.name, "Coordinator Guide A");
   });
 
-  test("Phase 25: validateNewTourForm enforces or permits duplicate booking reference based on allowDuplicateReference flag", () => {
+  test(": validateNewTourForm enforces or permits duplicate booking reference based on allowDuplicateReference flag", () => {
     const existingReferences = ["999901", "1253601"];
 
     // 1. Without allowDuplicateReference: throws validation error
@@ -1226,7 +1226,7 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     assert.ok(created.id.startsWith("tour-"));
   });
 
-  test("Phase 25 Regression: legacy update without sourceRecordId preserves existing sourceRecordId and provenance", () => {
+  test(" Regression: legacy update without sourceRecordId preserves existing sourceRecordId and provenance", () => {
     const existingTour: Tour = {
       id: "satf-1222824-oct-23-r21",
       bookingReference: "1222824",
@@ -1321,7 +1321,7 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     assert.strictEqual(merged.hotels[0]?.confirmationNumber, "CONF-AGRA-101");
   });
 
-  test("Phase 25 Regression: migration script phase25_repeat_reference_safe.sql syntax and safety verification", () => {
+  test(" Regression: migration script phase25_repeat_reference_safe.sql syntax and safety verification", () => {
     const migrationPath = path.join(__dirname, "..", "supabase", "phase25_repeat_reference_safe.sql");
     assert.ok(fs.existsSync(migrationPath), "Migration file phase25_repeat_reference_safe.sql must exist");
 
@@ -1381,9 +1381,9 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     );
   });
 
-  test("Phase 25 Regression (Local): rowToTour backfills sourceRecordId from provenance when table column is null", () => {
+  test(" Regression (Local): rowToTour backfills sourceRecordId from provenance when table column is null", () => {
     // Simulate legacy PostgreSQL row where source_record_id column is NULL,
-    // but provenance JSONB contains source_record_id and enriched Phase 24 fields
+    // but provenance JSONB contains source_record_id and enriched  fields
     const legacyRow: Record<string, unknown> = {
       id: "satf-1253601",
       booking_reference: "1253601",
@@ -1432,7 +1432,7 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     assert.strictEqual(serialized.source_record_id, "JAN 2026:R2:1253601");
   });
 
-  test("Phase 25 Regression (Local): compareIncomingWithExisting flags conflict when multiple existing records share booking reference without source identity", () => {
+  test(" Regression (Local): compareIncomingWithExisting flags conflict when multiple existing records share booking reference without source identity", () => {
     // Two legacy existing tours sharing reference '1222824' (neither has sourceRecordId populated yet)
     const legacyTour1: Tour = {
       id: "satf-1222824-a",
@@ -1495,7 +1495,7 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
     assert.ok(comparison.details[0].reason.includes("Multiple existing operational tours (2) share booking reference"));
   });
 
-  test("Phase 25 Regression (Local): legacy re-import matches single existing legacy record, updates it, and adopts sourceRecordId without duplication", () => {
+  test(" Regression (Local): legacy re-import matches single existing legacy record, updates it, and adopts sourceRecordId without duplication", () => {
     // Single existing legacy record: has id = 'satf-1253601', no sourceRecordId
     const legacyTour: Tour = {
       id: "satf-1253601",
@@ -1566,7 +1566,7 @@ describe("Duplicate Booking References, Stable Identity & Persistence Compatibil
   });
 });
 
-describe("Phase 35 — Historical Date Ambiguity Reconciliation via Source Evidence", () => {
+describe(" — Historical Date Ambiguity Reconciliation via Source Evidence", () => {
   test("resolveHistoricalDateCandidate parses shorthand formats with sheet context", () => {
     // Integer day 1..31
     assert.strictEqual(resolveHistoricalDateCandidate(3, 2017, 1), "2017-01-03");
