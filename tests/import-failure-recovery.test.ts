@@ -374,6 +374,7 @@ describe("Phase 38 — Import Failure Recovery & Idempotent Retry Verification",
       body: JSON.stringify({
         payload: previewPayload,
         dryRun: false, // Live import attempt against mocked Supabase
+        dateDecisions: [],
       }),
     });
 

@@ -332,8 +332,6 @@ export interface RevokedSessionRecord {
 }
 
 const inMemoryRevokedTokens = new Set<string>();
-let lastStorageSync = 0;
-const STORAGE_SYNC_TTL_MS = 5000;
 
 function getSupabaseStorageConfig(): { url: string; key: string } | null {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -380,34 +378,28 @@ export async function syncRevocationsFromStorage(): Promise<Set<string>> {
   }
 
   try {
-    const url = `${config.url}/storage/v1/object/satf-security/revoked-sessions.json`;
-    const res = await fetch(url, {
+    const listUrl = `${config.url}/storage/v1/object/list/satf-security`;
+    const res = await fetch(listUrl, {
+      method: "POST",
       headers: {
         apikey: config.key,
         Authorization: `Bearer ${config.key}`,
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify({ prefix: "revocations/", limit: 1000 }),
     });
 
-    if (res.status === 404) {
-      lastStorageSync = Date.now();
-      return loadLocalRevokedTokens();
-    }
-
-    if (!res.ok) {
-      if (process.env.NODE_ENV === "production") {
-        throw new Error(`Durable revocation store returned HTTP ${res.status}`);
+    if (res.ok) {
+      const items = (await res.json()) as Array<{ name: string }>;
+      for (const item of items) {
+        if (item.name && item.name.endsWith(".json")) {
+          const jti = item.name.replace(/^revocations\//, "").replace(/\.json$/, "");
+          inMemoryRevokedTokens.add(jti);
+        }
       }
-      return loadLocalRevokedTokens();
+    } else if (res.status !== 404 && process.env.NODE_ENV === "production") {
+      throw new Error(`Durable revocation store returned HTTP ${res.status}`);
     }
-
-    const list = (await res.json()) as RevokedSessionRecord[];
-    const now = Date.now();
-    for (const item of list) {
-      if (item && item.exp > now) {
-        inMemoryRevokedTokens.add(item.jti);
-      }
-    }
-    lastStorageSync = Date.now();
   } catch (err) {
     if (process.env.NODE_ENV === "production") {
       throw err;
@@ -418,7 +410,7 @@ export async function syncRevocationsFromStorage(): Promise<Set<string>> {
 
 /**
  * Persist a session revocation to shared, durable Supabase Storage and local cache.
- * Automatically cleans up expired revocation records.
+ * Uses atomic individual objects (/revocations/<jti>.json) to guarantee race-free concurrency.
  */
 export async function revokeSession(
   jti: string,
@@ -448,25 +440,12 @@ export async function revokeSession(
     // In-memory set maintained if local filesystem is read-only
   }
 
-  // 2. Persist to shared, durable Supabase Storage
+  // 2. Persist to shared, durable Supabase Storage via atomic per-token object
   const config = getSupabaseStorageConfig();
   if (config) {
     try {
-      const getUrl = `${config.url}/storage/v1/object/satf-security/revoked-sessions.json`;
-      let remoteList: RevokedSessionRecord[] = [];
-      const getRes = await fetch(getUrl, {
-        headers: { apikey: config.key, Authorization: `Bearer ${config.key}` },
-      });
-      if (getRes.ok) {
-        try {
-          remoteList = await getRes.json();
-        } catch {}
-      }
-      remoteList = remoteList.filter((item) => item.exp > now);
-      remoteList.push({ jti, exp, revokedAt: now });
-
-      const postUrl = `${config.url}/storage/v1/object/satf-security/revoked-sessions.json`;
-      await fetch(postUrl, {
+      const tokenUrl = `${config.url}/storage/v1/object/satf-security/revocations/${jti}.json`;
+      const res = await fetch(tokenUrl, {
         method: "POST",
         headers: {
           apikey: config.key,
@@ -474,9 +453,12 @@ export async function revokeSession(
           "Content-Type": "application/json",
           "x-upsert": "true",
         },
-        body: JSON.stringify(remoteList),
+        body: JSON.stringify({ jti, exp, revokedAt: now }),
       });
-      lastStorageSync = Date.now();
+
+      if (!res.ok && res.status !== 409) {
+        throw new Error(`Failed to store revocation token: HTTP ${res.status}`);
+      }
     } catch (err) {
       if (process.env.NODE_ENV === "production") {
         throw new Error(
@@ -501,26 +483,45 @@ export function isSessionRevoked(jti: string): boolean {
 /**
  * Asynchronous cross-instance revocation check.
  * Queries shared durable storage across Vercel serverless instances.
- * Fails closed in production if storage check fails.
+ * Checks atomic object (/revocations/<jti>.json) and fails closed in production on errors.
  */
 export async function isSessionRevokedAsync(jti: string): Promise<boolean> {
   if (!jti) return false;
-  if (inMemoryRevokedTokens.has(jti)) return true;
+  // Positive local match is permanent (sessions are never un-revoked)
+  if (inMemoryRevokedTokens.has(jti) || isSessionRevoked(jti)) return true;
 
-  const now = Date.now();
-  if (now - lastStorageSync < STORAGE_SYNC_TTL_MS) {
-    return isSessionRevoked(jti);
-  }
+  const config = getSupabaseStorageConfig();
+  if (!config) return false;
 
   try {
-    await syncRevocationsFromStorage();
+    const tokenUrl = `${config.url}/storage/v1/object/satf-security/revocations/${jti}.json`;
+    const res = await fetch(tokenUrl, {
+      method: "GET",
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+      },
+    });
+
+    if (res.status === 200) {
+      inMemoryRevokedTokens.add(jti);
+      return true;
+    }
+
+    if (res.status === 404) {
+      return false;
+    }
+
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(`Revocation store returned HTTP ${res.status}`);
+    }
   } catch (err) {
     if (process.env.NODE_ENV === "production") {
       throw new Error(`Revocation store unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  return inMemoryRevokedTokens.has(jti) || isSessionRevoked(jti);
+  return inMemoryRevokedTokens.has(jti);
 }
 
 // ─── Shared Rate Limiting Helpers ───────────────────────────────────────────

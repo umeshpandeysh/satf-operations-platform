@@ -208,4 +208,81 @@ test("Role Separation & Session Revocation Verification", async (t) => {
     assert.strictEqual(authResult.status, 401);
     assert.match(authResult.error || "", /revoked/i);
   });
+
+  // Scenario 9: Reproducible concurrency test issuing multiple independent revocations
+  await t.test("Scenario 9: Concurrent independent revocations preserve every revoked token without overwrite", async () => {
+    const concurrentSessions = Array.from({ length: 8 }, (_, i) =>
+      createSessionToken(`Coordinator ${i}`, { role: "coordinator" })
+    );
+
+    // Issue all revocations simultaneously in parallel
+    await Promise.all(
+      concurrentSessions.map((s) => {
+        const jti = s.payload.jti;
+        assert.ok(jti);
+        return revokeSession(jti, s.payload.exp);
+      })
+    );
+
+    // Verify every single token remains revoked (no overwrite from race conditions)
+    for (const s of concurrentSessions) {
+      const jti = s.payload.jti;
+      assert.ok(jti);
+      const isRev = await isSessionRevokedAsync(jti);
+      assert.strictEqual(isRev, true, `Token ${jti} must remain revoked`);
+      const verification = verifySessionToken(s.token);
+      assert.strictEqual(verification.valid, false);
+    }
+  });
+
+  // Scenario 10: Cross-instance verification in a separate isolated process (simulated serverless container)
+  await t.test("Scenario 10: Revoked token is rejected in separate isolated execution context", async () => {
+    const session = createSessionToken("Serverless User", { role: "coordinator" });
+    const jti = session.payload.jti;
+    assert.ok(jti);
+
+    // Revoke token in current instance
+    await revokeSession(jti, session.payload.exp);
+
+    // Run verification in a completely separate Node.js process with clean memory
+    const { execFileSync } = await import("node:child_process");
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const tmpDir = path.resolve(process.cwd(), "data");
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    const tmpFile = path.join("data", ".test_isolated_instance.ts");
+
+    fs.writeFileSync(
+      tmpFile,
+      `import { isSessionRevokedAsync, verifySessionToken } from "../lib/auth";
+async function run() {
+  const isRev = await isSessionRevokedAsync("${jti}");
+  const ver = verifySessionToken("${session.token}");
+  if (!isRev || ver.valid) {
+    process.exit(1);
+  }
+  process.exit(0);
+}
+run().catch(() => process.exit(2));
+`
+    );
+
+    try {
+      const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+      assert.doesNotThrow(() => {
+        execFileSync(npxCmd, ["tsx", `"${tmpFile}"`], {
+          shell: true,
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            SATF_SESSION_SECRET: "satf-test-session-secret-for-local-unit-tests-only-min32",
+          },
+        });
+      }, "Isolated process must verify that the token is revoked");
+    } finally {
+      if (fs.existsSync(tmpFile)) {
+        try { fs.unlinkSync(tmpFile); } catch {}
+      }
+    }
+  });
 });
