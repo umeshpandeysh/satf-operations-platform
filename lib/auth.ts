@@ -54,19 +54,37 @@ export function getAdminPassphrase(): string | null {
 
 /**
  * Determine verified role from passphrase without trusting client claims.
- * Matches admin passphrase first (lead_coordinator), then operator passphrase (coordinator).
+ * Fails closed if credentials are misconfigured, ambiguous, or identical.
  */
 export function getPassphraseRole(input: string): "lead_coordinator" | "coordinator" | null {
   if (typeof input !== "string" || !input) return null;
 
   const adminPass = getAdminPassphrase();
+  const opPass = getOperatorPassphrase();
+
+  // Defend against ambiguous/colliding configuration:
+  // If adminPass and opPass are both set and identical, fail closed to least privilege:
+  // NEVER grant lead_coordinator on ambiguous or identical credentials!
+  if (adminPass && opPass) {
+    const adminHash = crypto.createHash("sha256").update(adminPass).digest();
+    const opHash = crypto.createHash("sha256").update(opPass).digest();
+    if (crypto.timingSafeEqual(adminHash, opHash)) {
+      console.warn("SECURITY WARNING: SATF_ADMIN_PASSPHRASE and SATF_OPERATOR_PASSPHRASE are identical. Elevated access disabled. Failing closed to coordinator.");
+      const inputHash = crypto.createHash("sha256").update(input).digest();
+      if (crypto.timingSafeEqual(inputHash, opHash)) {
+        return "coordinator";
+      }
+      return null;
+    }
+  }
+
+  // When credentials are distinct and unambiguous:
   if (adminPass) {
     const a = crypto.createHash("sha256").update(input).digest();
     const b = crypto.createHash("sha256").update(adminPass).digest();
     if (crypto.timingSafeEqual(a, b)) return "lead_coordinator";
   }
 
-  const opPass = getOperatorPassphrase();
   if (opPass) {
     const a = crypto.createHash("sha256").update(input).digest();
     const b = crypto.createHash("sha256").update(opPass).digest();
@@ -305,15 +323,24 @@ export function resetRateLimit(identifier: string): void {
   rateLimitMap.delete(identifier);
 }
 
-// ─── Cross-Instance Session Revocation Store ────────────────────────────────
+// ─── Shared, Durable Cross-Instance Session Revocation Store ─────────────────
 
-interface RevokedSessionRecord {
+export interface RevokedSessionRecord {
   jti: string;
   exp: number;
   revokedAt: number;
 }
 
 const inMemoryRevokedTokens = new Set<string>();
+let lastStorageSync = 0;
+const STORAGE_SYNC_TTL_MS = 5000;
+
+function getSupabaseStorageConfig(): { url: string; key: string } | null {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return { url: url.replace(/\/+$/, ""), key };
+}
 
 function getRevocationFilePath(): string {
   if (process.env.NODE_ENV === "production") {
@@ -322,7 +349,7 @@ function getRevocationFilePath(): string {
   return path.resolve(process.cwd(), "data", ".revoked_sessions.json");
 }
 
-function loadRevokedTokens(): Set<string> {
+function loadLocalRevokedTokens(): Set<string> {
   const set = new Set<string>(inMemoryRevokedTokens);
   try {
     const filePath = getRevocationFilePath();
@@ -342,9 +369,66 @@ function loadRevokedTokens(): Set<string> {
   return set;
 }
 
-export function revokeSession(jti: string, exp: number = Date.now() + SESSION_DURATION_SECONDS * 1000): void {
+/**
+ * Fetch revoked sessions from shared, durable Supabase Storage.
+ * Synchronizes revocation across all Vercel serverless containers.
+ */
+export async function syncRevocationsFromStorage(): Promise<Set<string>> {
+  const config = getSupabaseStorageConfig();
+  if (!config) {
+    return loadLocalRevokedTokens();
+  }
+
+  try {
+    const url = `${config.url}/storage/v1/object/satf-security/revoked-sessions.json`;
+    const res = await fetch(url, {
+      headers: {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+      },
+    });
+
+    if (res.status === 404) {
+      lastStorageSync = Date.now();
+      return loadLocalRevokedTokens();
+    }
+
+    if (!res.ok) {
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(`Durable revocation store returned HTTP ${res.status}`);
+      }
+      return loadLocalRevokedTokens();
+    }
+
+    const list = (await res.json()) as RevokedSessionRecord[];
+    const now = Date.now();
+    for (const item of list) {
+      if (item && item.exp > now) {
+        inMemoryRevokedTokens.add(item.jti);
+      }
+    }
+    lastStorageSync = Date.now();
+  } catch (err) {
+    if (process.env.NODE_ENV === "production") {
+      throw err;
+    }
+  }
+  return inMemoryRevokedTokens;
+}
+
+/**
+ * Persist a session revocation to shared, durable Supabase Storage and local cache.
+ * Automatically cleans up expired revocation records.
+ */
+export async function revokeSession(
+  jti: string,
+  exp: number = Date.now() + SESSION_DURATION_SECONDS * 1000
+): Promise<void> {
   if (!jti) return;
   inMemoryRevokedTokens.add(jti);
+  const now = Date.now();
+
+  // 1. Local filesystem cache update
   try {
     const filePath = getRevocationFilePath();
     const dir = path.dirname(filePath);
@@ -357,20 +441,171 @@ export function revokeSession(jti: string, exp: number = Date.now() + SESSION_DU
         list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
       } catch {}
     }
-    const now = Date.now();
     list = list.filter((item) => item.exp > now);
     list.push({ jti, exp, revokedAt: now });
     fs.writeFileSync(filePath, JSON.stringify(list), { encoding: "utf-8", mode: 0o600 });
   } catch {
-    // If disk write fails in restricted environment, in-memory set is maintained
+    // In-memory set maintained if local filesystem is read-only
+  }
+
+  // 2. Persist to shared, durable Supabase Storage
+  const config = getSupabaseStorageConfig();
+  if (config) {
+    try {
+      const getUrl = `${config.url}/storage/v1/object/satf-security/revoked-sessions.json`;
+      let remoteList: RevokedSessionRecord[] = [];
+      const getRes = await fetch(getUrl, {
+        headers: { apikey: config.key, Authorization: `Bearer ${config.key}` },
+      });
+      if (getRes.ok) {
+        try {
+          remoteList = await getRes.json();
+        } catch {}
+      }
+      remoteList = remoteList.filter((item) => item.exp > now);
+      remoteList.push({ jti, exp, revokedAt: now });
+
+      const postUrl = `${config.url}/storage/v1/object/satf-security/revoked-sessions.json`;
+      await fetch(postUrl, {
+        method: "POST",
+        headers: {
+          apikey: config.key,
+          Authorization: `Bearer ${config.key}`,
+          "Content-Type": "application/json",
+          "x-upsert": "true",
+        },
+        body: JSON.stringify(remoteList),
+      });
+      lastStorageSync = Date.now();
+    } catch (err) {
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(
+          `Failed to persist session revocation to shared storage: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
   }
 }
 
+/**
+ * Check if session is revoked.
+ * Fast synchronous check against in-memory and local disk caches.
+ */
 export function isSessionRevoked(jti: string): boolean {
   if (!jti) return false;
   if (inMemoryRevokedTokens.has(jti)) return true;
-  const set = loadRevokedTokens();
+  const set = loadLocalRevokedTokens();
   return set.has(jti);
+}
+
+/**
+ * Asynchronous cross-instance revocation check.
+ * Queries shared durable storage across Vercel serverless instances.
+ * Fails closed in production if storage check fails.
+ */
+export async function isSessionRevokedAsync(jti: string): Promise<boolean> {
+  if (!jti) return false;
+  if (inMemoryRevokedTokens.has(jti)) return true;
+
+  const now = Date.now();
+  if (now - lastStorageSync < STORAGE_SYNC_TTL_MS) {
+    return isSessionRevoked(jti);
+  }
+
+  try {
+    await syncRevocationsFromStorage();
+  } catch (err) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(`Revocation store unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return inMemoryRevokedTokens.has(jti) || isSessionRevoked(jti);
+}
+
+// ─── Shared Rate Limiting Helpers ───────────────────────────────────────────
+
+function hashRateLimitIdentifier(identifier: string): string {
+  return crypto.createHash("sha256").update(identifier).digest("hex").slice(0, 16);
+}
+
+export async function checkRateLimitAsync(identifier: string): Promise<{
+  allowed: boolean;
+  remainingAttempts: number;
+  retryAfterSeconds?: number;
+}> {
+  const syncCheck = checkRateLimit(identifier);
+  if (!syncCheck.allowed) return syncCheck;
+
+  const config = getSupabaseStorageConfig();
+  if (!config) return syncCheck;
+
+  try {
+    const hashedId = hashRateLimitIdentifier(identifier);
+    const url = `${config.url}/storage/v1/object/satf-security/rate-limits/${hashedId}.json`;
+    const res = await fetch(url, {
+      headers: { apikey: config.key, Authorization: `Bearer ${config.key}` },
+    });
+    if (res.ok) {
+      const record = (await res.json()) as { attempts: number; firstAttemptAt: number; lockedUntil: number | null };
+      const now = Date.now();
+      if (record.lockedUntil && now < record.lockedUntil) {
+        rateLimitMap.set(identifier, record);
+        return {
+          allowed: false,
+          remainingAttempts: 0,
+          retryAfterSeconds: Math.ceil((record.lockedUntil - now) / 1000),
+        };
+      }
+    }
+  } catch {}
+
+  return syncCheck;
+}
+
+export async function recordFailedAttemptAsync(identifier: string): Promise<{
+  allowed: boolean;
+  remainingAttempts: number;
+  retryAfterSeconds?: number;
+}> {
+  const localRes = recordFailedAttempt(identifier);
+  const config = getSupabaseStorageConfig();
+  if (!config) return localRes;
+
+  try {
+    const hashedId = hashRateLimitIdentifier(identifier);
+    const record = rateLimitMap.get(identifier);
+    if (record) {
+      const url = `${config.url}/storage/v1/object/satf-security/rate-limits/${hashedId}.json`;
+      await fetch(url, {
+        method: "POST",
+        headers: {
+          apikey: config.key,
+          Authorization: `Bearer ${config.key}`,
+          "Content-Type": "application/json",
+          "x-upsert": "true",
+        },
+        body: JSON.stringify(record),
+      });
+    }
+  } catch {}
+
+  return localRes;
+}
+
+export async function resetRateLimitAsync(identifier: string): Promise<void> {
+  resetRateLimit(identifier);
+  const config = getSupabaseStorageConfig();
+  if (!config) return;
+
+  try {
+    const hashedId = hashRateLimitIdentifier(identifier);
+    const url = `${config.url}/storage/v1/object/satf-security/rate-limits/${hashedId}.json`;
+    await fetch(url, {
+      method: "DELETE",
+      headers: { apikey: config.key, Authorization: `Bearer ${config.key}` },
+    });
+  } catch {}
 }
 
 // ─── Session Token Signing & Verification ────────────────────────────────────
@@ -385,11 +620,11 @@ export function createSessionToken(
   const now = Date.now();
   const csrfToken = crypto.randomBytes(24).toString("hex");
   const jti = metadata.jti || crypto.randomBytes(16).toString("hex");
-  const role =
-    metadata.role ||
-    (operatorName.toLowerCase().includes("lead") || operatorName.toLowerCase().includes("admin")
-      ? "lead_coordinator"
-      : "coordinator");
+
+  // Role is strictly derived from verified metadata.role. Never infer elevated privileges from operatorName or titles.
+  const role = metadata.role === "lead_coordinator" || metadata.role === "admin"
+    ? metadata.role
+    : "coordinator";
 
   const payload: SessionPayload = {
     operator: operatorName,
@@ -509,15 +744,17 @@ export function isDevelopmentBypassActive(): boolean {
   return process.env.SATF_DEV_AUTH_BYPASS === "true";
 }
 
-export function authenticateOperatorRequest(
-  req: NextRequest,
-  options: { requiredRole?: "coordinator" | "lead_coordinator"; checkCsrf?: boolean } = {}
-): {
+export type AuthenticateOperatorResult = {
   authorized: boolean;
   payload: SessionPayload;
   error?: string;
   status: 200 | 401 | 403 | 500;
-} {
+};
+
+function authenticateOperatorRequestSync(
+  req: NextRequest,
+  options: { requiredRole?: "coordinator" | "lead_coordinator"; checkCsrf?: boolean } = {}
+): AuthenticateOperatorResult {
   // 1. Read session cookie
   const cookie = req.cookies.get(COOKIE_NAME);
   if (cookie && cookie.value) {
@@ -604,6 +841,56 @@ export function authenticateOperatorRequest(
     error: "Unauthorized: Staff session required. Please log in.",
     status: 401,
   };
+}
+
+export function authenticateOperatorRequest(
+  req: NextRequest,
+  options: { requiredRole?: "coordinator" | "lead_coordinator"; checkCsrf?: boolean } = {}
+): AuthenticateOperatorResult & PromiseLike<AuthenticateOperatorResult> {
+  const syncResult = authenticateOperatorRequestSync(req, options);
+
+  const thenableResult: AuthenticateOperatorResult & PromiseLike<AuthenticateOperatorResult> = {
+    ...syncResult,
+    then<TResult1 = AuthenticateOperatorResult, TResult2 = never>(
+      onfulfilled?: ((value: AuthenticateOperatorResult) => TResult1 | PromiseLike<TResult1>) | null,
+      onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+    ): Promise<TResult1 | TResult2> {
+      return (async () => {
+        if (syncResult.authorized && syncResult.payload?.jti) {
+          try {
+            const isRevoked = await isSessionRevokedAsync(syncResult.payload.jti);
+            if (isRevoked) {
+              return {
+                authorized: false,
+                payload: null as unknown as SessionPayload,
+                error: "Unauthorized: Session has been revoked. Please log in again.",
+                status: 401 as const,
+              };
+            }
+          } catch {
+            if (process.env.NODE_ENV === "production") {
+              return {
+                authorized: false,
+                payload: null as unknown as SessionPayload,
+                error: "Unauthorized: Revocation verification failed.",
+                status: 401 as const,
+              };
+            }
+          }
+        }
+        return syncResult;
+      })().then(onfulfilled, onrejected);
+    },
+  };
+
+  return thenableResult;
+}
+
+export async function authenticateOperatorRequestAsync(
+  req: NextRequest,
+  options: { requiredRole?: "coordinator" | "lead_coordinator"; checkCsrf?: boolean } = {}
+): Promise<AuthenticateOperatorResult> {
+  return await authenticateOperatorRequest(req, options);
 }
 
 /**

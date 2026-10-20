@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { COOKIE_NAME } from "./auth-constants";
-import { verifySessionToken } from "./auth";
+import { verifySessionToken, isSessionRevokedAsync } from "./auth";
 import { getCanonicalTours, getCanonicalTourById } from "./canonical-store";
 import { getMockTours, getTourById as getMockTourById } from "./mock-data";
 import { getIndiaTodayISO } from "./utils";
@@ -44,7 +44,13 @@ export async function isServerRequestAuthenticated(
       return false;
     }
     const verification = verifySessionToken(sessionCookie.value);
-    return Boolean(verification.valid && verification.payload);
+    if (!verification.valid || !verification.payload) {
+      return false;
+    }
+    if (verification.payload.jti && (await isSessionRevokedAsync(verification.payload.jti))) {
+      return false;
+    }
+    return true;
   } catch {
     // When called outside Next.js request context (e.g. standalone test scripts):
     if (!process.env.NEXT_RUNTIME && process.env.NODE_ENV !== "production") {

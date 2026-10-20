@@ -395,7 +395,7 @@ describe(" — Commit Safeguards, Idempotency & Partial Failure Handling", () =>
   test("Safeguard 1: Commit is rejected with HTTP 422 when date ambiguities lack coordinator decisions", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
@@ -426,7 +426,7 @@ describe(" — Commit Safeguards, Idempotency & Partial Failure Handling", () =>
   test("Safeguard 1 (B): Commit succeeds when explicit valid coordinator date decision is provided", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
@@ -516,7 +516,7 @@ describe(" — Commit Safeguards, Idempotency & Partial Failure Handling", () =>
       errors: [],
     };
 
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
@@ -681,7 +681,7 @@ describe(" — Commit Safeguards, Idempotency & Partial Failure Handling", () =>
   test(" (A): Commit accepts valid 'override' decision and applies custom date", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
@@ -716,7 +716,7 @@ describe(" — Commit Safeguards, Idempotency & Partial Failure Handling", () =>
   test(" (B): Commit rejects duplicate decisions matching the same record with HTTP 422 DUPLICATE_DATE_DECISIONS", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
@@ -757,7 +757,7 @@ describe(" — Commit Safeguards, Idempotency & Partial Failure Handling", () =>
   test(" (C): Commit rejects stale decisions pointing to non-existent source records with HTTP 422 STALE_DATE_DECISION", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
@@ -792,7 +792,7 @@ describe(" — Commit Safeguards, Idempotency & Partial Failure Handling", () =>
   test(" (D): Commit rejects invalid calendar dates (e.g. 2023-02-31, 2026-13-45) with HTTP 422 INVALID_CALENDAR_DATE", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {
@@ -900,7 +900,7 @@ describe(" — Commit Safeguards, Idempotency & Partial Failure Handling", () =>
       errors: [],
     };
 
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {

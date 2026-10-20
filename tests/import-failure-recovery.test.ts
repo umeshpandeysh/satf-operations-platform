@@ -361,7 +361,7 @@ describe("Phase 38 — Import Failure Recovery & Idempotent Retry Verification",
     // Fail tour #3
     mockDb.shouldFailOnId.add("satf-103");
 
-    const { token, payload } = createSessionToken("Lead Coordinator");
+    const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: {

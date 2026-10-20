@@ -3,9 +3,9 @@ import {
   getPassphraseRole,
   verifyCoordinatorCredentials,
   createSessionToken,
-  recordFailedAttempt,
-  resetRateLimit,
-  checkRateLimit,
+  recordFailedAttemptAsync,
+  resetRateLimitAsync,
+  checkRateLimitAsync,
   getSessionCookieConfig,
 } from "@/lib/auth";
 
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   try {
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "127.0.0.1";
-    const rateCheck = checkRateLimit(ip);
+    const rateCheck = await checkRateLimitAsync(ip);
 
     if (!rateCheck.allowed) {
       return NextResponse.json(
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     if (username && typeof username === "string" && username.trim()) {
       const coordAuth = verifyCoordinatorCredentials(username.trim(), passphrase, mfaCode);
       if (!coordAuth.success) {
-        const record = recordFailedAttempt(ip);
+        const record = await recordFailedAttemptAsync(ip);
         return NextResponse.json(
           {
             success: false,
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
     } else {
       const verifiedRole = getPassphraseRole(passphrase);
       if (!verifiedRole) {
-        const record = recordFailedAttempt(ip);
+        const record = await recordFailedAttemptAsync(ip);
         return NextResponse.json(
           {
             success: false,
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Passphrase valid -> reset attempts and issue session
-    resetRateLimit(ip);
+    await resetRateLimitAsync(ip);
     const session = createSessionToken(sessionOperator, {
       username: sessionUsername,
       role: sessionRole,

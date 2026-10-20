@@ -9,7 +9,7 @@ export async function POST(req?: NextRequest) {
     if (sessionCookie) {
       const verification = verifySessionToken(sessionCookie);
       if (verification.valid && verification.payload?.jti) {
-        revokeSession(verification.payload.jti, verification.payload.exp);
+        await revokeSession(verification.payload.jti, verification.payload.exp);
       }
     }
   } catch (err) {

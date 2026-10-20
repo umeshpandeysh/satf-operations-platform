@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint app components lib",
-    "test": "tsx --test tests/operations.test.ts tests/parser.test.ts tests/security.test.ts tests/import-review-ui.test.ts tests/import-failure-recovery.test.ts tests/i18n.test.ts tests/email-issues.test.ts tests/perimeter-auth.test.ts",
+    "test": "tsx --test tests/operations.test.ts tests/parser.test.ts tests/security.test.ts tests/import-review-ui.test.ts tests/import-failure-recovery.test.ts tests/i18n.test.ts tests/email-issues.test.ts tests/perimeter-auth.test.ts tests/role-separation-revocation.test.ts",
     "test:e2e": "tsx --test tests/persistence-e2e.test.ts"
   },
   "dependencies": {
