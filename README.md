@@ -168,7 +168,7 @@ The API is organized under /api and includes authentication/session endpoints, o
 │   └── brand/                     # SATF logo and brand assets
 ├── supabase/
 │   ├── satf_schema.sql            # Database schema and operational RPC definitions
-│   └── phase25_repeat_reference_safe.sql
+│   └── repeat_reference_safe.sql
 ├── tests/                         # Unit, security, import, localization, persistence tests
 ├── .env.example                   # Environment variable template
 ├── middleware.ts                  # Request boundary and route protection
