@@ -18,7 +18,7 @@ import { POST as loginRoute } from "../app/api/auth/login/route";
 import { POST as logoutRoute } from "../app/api/auth/logout/route";
 import { GET as getToursRoute, POST as postToursRoute } from "../app/api/operations/tours/route";
 
-describe("SATF Phase 3: Session-Based Perimeter & Role-Based Authorization", () => {
+describe("SATF: Session-Based Perimeter & Role-Based Authorization", () => {
   const LEAD_EMAIL = "chief.coordinator@southasiatravelfactory.com";
   const STANDARD_EMAIL = "duty.staff@southasiatravelfactory.com";
 
