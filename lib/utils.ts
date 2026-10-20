@@ -34,6 +34,26 @@ export function addDaysToISO(isoDate: string, days: number): string {
   return `${y}-${m}-${dt}`;
 }
 
+/**
+ * Validates that a string is a strictly valid Gregorian calendar date in YYYY-MM-DD format.
+ * Rejects leap year overflows (e.g. 2026-02-29) and invalid month/day ranges.
+ */
+export function isValidCalendarDate(dateStr: string): boolean {
+  if (!dateStr || typeof dateStr !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return false;
+  }
+  const [y, m, day] = dateStr.split("-").map(Number);
+  if (y < 1900 || y > 2100 || m < 1 || m > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  const d = new Date(Date.UTC(y, m - 1, day));
+  return (
+    d.getUTCFullYear() === y &&
+    d.getUTCMonth() === m - 1 &&
+    d.getUTCDate() === day
+  );
+}
+
 // ─── Date formatting ─────────────────────────────────────────────────────────
 
 /**
@@ -42,7 +62,10 @@ export function addDaysToISO(isoDate: string, days: number): string {
  * e.g. "2026-10-17" → "17 Oct 2026"
  */
 export function formatDate(isoDate: string): string {
-  const [year, month, day] = isoDate.split("-").map(Number);
+  if (!isoDate) return "—";
+  const datePart = isoDate.split("T")[0];
+  const [year, month, day] = datePart.split("-").map(Number);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return isoDate;
   const d = new Date(Date.UTC(year, month - 1, day));
   return d.toLocaleDateString("en-GB", {
     timeZone: "UTC",
@@ -57,7 +80,10 @@ export function formatDate(isoDate: string): string {
  * e.g. "2026-10-17" → "17 Oct"
  */
 export function formatDateShort(isoDate: string): string {
-  const [year, month, day] = isoDate.split("-").map(Number);
+  if (!isoDate) return "—";
+  const datePart = isoDate.split("T")[0];
+  const [year, month, day] = datePart.split("-").map(Number);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return isoDate;
   const d = new Date(Date.UTC(year, month - 1, day));
   return d.toLocaleDateString("en-GB", {
     timeZone: "UTC",

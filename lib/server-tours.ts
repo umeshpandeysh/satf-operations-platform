@@ -14,7 +14,7 @@ import {
  * or falls back to baseline mock tours for demo mode and unimported environments.
  */
 export function getBaseTours(referenceDate: string = getIndiaTodayISO()): Tour[] {
-  const canonical = getCanonicalTours();
+  const canonical = getCanonicalTours(referenceDate);
   if (canonical && canonical.length > 0) {
     return canonical;
   }
@@ -29,7 +29,7 @@ export function getTourById(
   id: string,
   referenceDate: string = getIndiaTodayISO()
 ): Tour | undefined {
-  const canonicalTour = getCanonicalTourById(id);
+  const canonicalTour = getCanonicalTourById(id, referenceDate);
   if (canonicalTour) return canonicalTour;
   return getMockTourById(id, referenceDate);
 }
@@ -42,34 +42,27 @@ export function getTourById(
 export async function getEffectiveServerTours(
   referenceDate: string = getIndiaTodayISO()
 ): Promise<Tour[]> {
-  const baseTours = getBaseTours(referenceDate);
   const config = getDatabaseConfigStatus();
   if (!config.configured) {
-    return baseTours;
+    return getBaseTours(referenceDate);
   }
 
   try {
-    const dbRes = await getPersistentTours();
+    const dbRes = await getPersistentTours(referenceDate);
     if (dbRes.success && dbRes.data) {
-      const dbMap = new Map(dbRes.data.map((t) => [t.id, t]));
-      const merged = [...dbRes.data];
-      for (const base of baseTours) {
-        if (!dbMap.has(base.id)) {
-          merged.push(base);
-        }
-      }
-      return merged;
+      // Authoritative database: if 0 tours in satf_operational_tours, return []
+      return dbRes.data;
     }
   } catch (err) {
     console.error("Failed to load persistent tours from database:", err);
   }
 
-  return baseTours;
+  return [];
 }
 
 /**
  * Server-only effective tour resolver by ID.
- * Queries Supabase first for the authoritative persistent tour, falling back to baseline.
+ * Queries Supabase first for the authoritative persistent tour.
  */
 export async function getEffectiveServerTourById(
   id: string,
@@ -81,13 +74,14 @@ export async function getEffectiveServerTourById(
   const config = getDatabaseConfigStatus();
   if (config.configured) {
     try {
-      const dbRes = await getPersistentTourById(cleanId);
-      if (dbRes.success && dbRes.data) {
-        return dbRes.data;
+      const dbRes = await getPersistentTourById(cleanId, referenceDate);
+      if (dbRes.success) {
+        return dbRes.data ?? null;
       }
     } catch (err) {
       console.error("Failed to load persistent tour from database:", err);
     }
+    return null;
   }
 
   return getTourById(cleanId, referenceDate) ?? null;

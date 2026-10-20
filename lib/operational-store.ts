@@ -21,7 +21,10 @@ import type {
   ResourceAssignment,
   SpecialRequest,
   OperationalIssue,
+  TrainJourney,
 } from "./types";
+import { mergeCoordinatorFields, computeTourLifecycleStatus } from "./operations";
+import { getIndiaTodayISO } from "./utils";
 
 export interface DatabaseConfigStatus {
   configured: boolean;
@@ -82,6 +85,7 @@ export function tourToRow(tour: Tour): Record<string, unknown> {
   return {
     id: tour.id,
     booking_reference: tour.bookingReference,
+    source_record_id: tour.sourceRecordId || null,
     group_data: tour.group,
     status: tour.status,
     destination: tour.destination || "",
@@ -102,6 +106,18 @@ export function tourToRow(tour: Tour): Record<string, unknown> {
     cancellation_reason: tour.cancellationReason || null,
     cancelled_at: tour.cancelledAt || null,
     is_imported: Boolean(tour.isImported),
+    provenance: {
+      source_record_id: tour.sourceRecordId || null,
+      train_journeys: tour.trainJourneys || [],
+      original_arrival_date: tour.originalArrivalDate || null,
+      date_correction_reason: tour.dateCorrectionReason || null,
+      has_cancellation_indicator: Boolean(tour.hasCancellationIndicator),
+      cancellation_indicator_reason: tour.cancellationIndicatorReason || null,
+      source_sheets: tour.sourceSheets || (tour.sourceSheet ? [tour.sourceSheet] : []),
+      raw_arrival_serial: tour.rawArrivalSerial ?? null,
+      has_date_ambiguity: Boolean(tour.hasDateAmbiguity),
+      date_ambiguity_reason: tour.dateAmbiguityReason || null,
+    },
     last_updated: tour.lastUpdated || new Date().toISOString(),
   };
 }
@@ -109,21 +125,49 @@ export function tourToRow(tour: Tour): Record<string, unknown> {
 /**
  * Deserializes a PostgreSQL table row into a TypeScript Tour entity.
  */
-export function rowToTour(row: Record<string, unknown>): Tour {
+export function rowToTour(row: Record<string, unknown>, referenceDate: string = getIndiaTodayISO()): Tour {
+  let prov: Record<string, unknown> = {};
+  if (row.provenance) {
+    prov = (typeof row.provenance === "string" ? JSON.parse(row.provenance) : row.provenance) as Record<string, unknown>;
+  }
+
+  const rawStatus = (row.status as TourStatus) || "upcoming";
+  const arrivalDate = String(row.arrival_date || "");
+  const departureDate = String(row.departure_date || "");
+  const status = computeTourLifecycleStatus(
+    {
+      status: rawStatus,
+      arrivalDate,
+      departureDate,
+      cancelledAt: (row.cancelled_at as string) || undefined,
+    },
+    referenceDate
+  );
+
   return {
     id: String(row.id),
     bookingReference: String(row.booking_reference),
+    sourceRecordId: (row.source_record_id as string) || (prov.source_record_id as string) || undefined,
     group: (typeof row.group_data === "string" ? JSON.parse(row.group_data) : row.group_data) as GuestGroup,
-    status: row.status as TourStatus,
+    status,
     destination: (row.destination as string) || "",
-    arrivalDate: String(row.arrival_date),
-    departureDate: String(row.departure_date),
+    arrivalDate,
+    departureDate,
     flights: (typeof row.flights === "string" ? JSON.parse(row.flights) : (row.flights || [])) as FlightLeg[],
     hotels: (typeof row.hotels === "string" ? JSON.parse(row.hotels) : (row.hotels || [])) as HotelStay[],
     itinerary: (typeof row.itinerary === "string" ? JSON.parse(row.itinerary) : (row.itinerary || [])) as ItineraryEntry[],
     assignments: (typeof row.assignments === "string" ? JSON.parse(row.assignments) : (row.assignments || [])) as ResourceAssignment[],
     specialRequests: (typeof row.special_requests === "string" ? JSON.parse(row.special_requests) : (row.special_requests || [])) as SpecialRequest[],
     issues: (typeof row.issues === "string" ? JSON.parse(row.issues) : (row.issues || [])) as OperationalIssue[],
+    trainJourneys: (prov.train_journeys as TrainJourney[]) || [],
+    originalArrivalDate: (prov.original_arrival_date as string) || undefined,
+    dateCorrectionReason: (prov.date_correction_reason as string) || undefined,
+    hasCancellationIndicator: prov.has_cancellation_indicator ? Boolean(prov.has_cancellation_indicator) : undefined,
+    cancellationIndicatorReason: (prov.cancellation_indicator_reason as string) || undefined,
+    sourceSheets: (prov.source_sheets as string[]) || (row.source_sheet ? [String(row.source_sheet)] : undefined),
+    rawArrivalSerial: typeof prov.raw_arrival_serial === "number" ? prov.raw_arrival_serial : undefined,
+    hasDateAmbiguity: prov.has_date_ambiguity ? Boolean(prov.has_date_ambiguity) : undefined,
+    dateAmbiguityReason: (prov.date_ambiguity_reason as string) || undefined,
     agency: (row.agency as string) || undefined,
     packageCode: (row.package_code as string) || undefined,
     sourceSheet: (row.source_sheet as string) || undefined,
@@ -223,35 +267,51 @@ async function executeSupabaseQuery<T>(
 /**
  * Retrieve all persistent operational tours from Supabase.
  */
-export async function getPersistentTours(): Promise<PersistenceResult<Tour[]>> {
+export async function getPersistentTours(referenceDate: string = getIndiaTodayISO()): Promise<PersistenceResult<Tour[]>> {
   const config = getDatabaseConfigStatus();
   if (!config.configured) {
     return createUnconfiguredError<Tour[]>();
   }
 
-  const res = await executeSupabaseQuery<Record<string, unknown>[]>("satf_operational_tours?select=*&order=arrival_date.asc");
-  if (!res.ok || !res.data) {
-    return {
-      success: false,
-      error: res.error || "Failed to retrieve operational tours from database",
-      code: "INTERNAL_ERROR",
-    };
+  const allRows: Record<string, unknown>[] = [];
+  const pageSize = 1000;
+  let offset = 0;
+
+  while (true) {
+    const res = await executeSupabaseQuery<Record<string, unknown>[]>(
+      `satf_operational_tours?select=*&order=arrival_date.asc&limit=${pageSize}&offset=${offset}`
+    );
+    if (!res.ok || !res.data) {
+      return {
+        success: false,
+        error: res.error || "Failed to retrieve operational tours from database",
+        code: "INTERNAL_ERROR",
+      };
+    }
+    allRows.push(...res.data);
+    if (res.data.length < pageSize) {
+      break;
+    }
+    offset += pageSize;
   }
 
-  return { success: true, data: res.data.map(rowToTour) };
+  return { success: true, data: allRows.map((r) => rowToTour(r, referenceDate)) };
 }
 
 /**
  * Retrieve a single operational tour by ID from Supabase.
  */
-export async function getPersistentTourById(id: string): Promise<PersistenceResult<Tour | null>> {
+export async function getPersistentTourById(
+  id: string,
+  referenceDate: string = getIndiaTodayISO()
+): Promise<PersistenceResult<Tour | null>> {
   const config = getDatabaseConfigStatus();
   if (!config.configured) {
     return createUnconfiguredError<Tour | null>();
   }
 
   const cleanId = encodeURIComponent(id.trim());
-  const res = await executeSupabaseQuery<Record<string, unknown>[]>(`satf_operational_tours?id=eq.${cleanId}&select=*&limit=1`);
+  let res = await executeSupabaseQuery<Record<string, unknown>[]>(`satf_operational_tours?id=eq.${cleanId}&select=*&limit=1`);
   if (!res.ok) {
     return {
       success: false,
@@ -260,8 +320,75 @@ export async function getPersistentTourById(id: string): Promise<PersistenceResu
     };
   }
 
-  const tour = res.data && res.data.length > 0 ? rowToTour(res.data[0]) : null;
+  // If not found by direct id, attempt resolution by satf- prefix or booking reference
+  if ((!res.data || res.data.length === 0) && id.trim()) {
+    const rawId = id.trim();
+    const altRes = await executeSupabaseQuery<Record<string, unknown>[]>(
+      `satf_operational_tours?or=(id.eq.satf-${encodeURIComponent(rawId)},booking_reference.eq.${encodeURIComponent(rawId)})&select=*&limit=1`
+    );
+    if (altRes.ok && altRes.data && altRes.data.length > 0) {
+      res = altRes;
+    }
+  }
+
+  const tour = res.data && res.data.length > 0 ? rowToTour(res.data[0], referenceDate) : null;
   return { success: true, data: tour };
+}
+
+/**
+ * Retrieve a single operational tour by its exact source record ID (e.g. 'OCT 23:R21:1222824').
+ */
+export async function getPersistentTourBySourceRecordId(
+  sourceRecordId: string,
+  referenceDate: string = getIndiaTodayISO()
+): Promise<PersistenceResult<Tour | null>> {
+  const config = getDatabaseConfigStatus();
+  if (!config.configured) {
+    return createUnconfiguredError<Tour | null>();
+  }
+
+  const cleanSrcId = encodeURIComponent(sourceRecordId.trim());
+  const res = await executeSupabaseQuery<Record<string, unknown>[]>(
+    `satf_operational_tours?source_record_id=eq.${cleanSrcId}&select=*&limit=1`
+  );
+  if (!res.ok) {
+    return {
+      success: false,
+      error: res.error || "Failed to retrieve tour by source record ID from database",
+      code: "INTERNAL_ERROR",
+    };
+  }
+
+  const tour = res.data && res.data.length > 0 ? rowToTour(res.data[0], referenceDate) : null;
+  return { success: true, data: tour };
+}
+
+/**
+ * Retrieve all operational tours sharing a specific booking reference.
+ * Returns an array supporting distinct tours with the same booking reference.
+ */
+export async function getPersistentToursByBookingRef(
+  bookingRef: string,
+  referenceDate: string = getIndiaTodayISO()
+): Promise<PersistenceResult<Tour[]>> {
+  const config = getDatabaseConfigStatus();
+  if (!config.configured) {
+    return createUnconfiguredError<Tour[]>();
+  }
+
+  const cleanRef = encodeURIComponent(bookingRef.trim());
+  const res = await executeSupabaseQuery<Record<string, unknown>[]>(
+    `satf_operational_tours?booking_reference=eq.${cleanRef}&select=*&order=arrival_date.asc`
+  );
+  if (!res.ok || !res.data) {
+    return {
+      success: false,
+      error: res.error || "Failed to retrieve tours by booking reference from database",
+      code: "INTERNAL_ERROR",
+    };
+  }
+
+  return { success: true, data: res.data.map((r) => rowToTour(r, referenceDate)) };
 }
 
 /**
@@ -321,7 +448,7 @@ export async function executeAtomicTourMutation(
       return {
         success: false,
         code: "DUPLICATE_KEY",
-        error: `A tour with booking reference '${tour.bookingReference}' already exists in database.`,
+        error: `A tour record with ID '${tour.id}' or source identifier '${tour.sourceRecordId || tour.bookingReference}' already exists in database.`,
       };
     }
 
@@ -400,4 +527,161 @@ export async function cancelPersistentTour(
   };
 
   return executeAtomicTourMutation(cancelledTour, "cancel", operator, expectedLastUpdated);
+}
+
+export interface BatchCommitItemResult {
+  sourceRecordId: string;
+  bookingReference: string;
+  action: "inserted" | "updated" | "skipped" | "failed";
+  tourId: string;
+  error?: string;
+}
+
+export interface BatchCommitSummary {
+  totalAttempted: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  items: BatchCommitItemResult[];
+  success: boolean;
+}
+
+/**
+ * Batch-persists imported tours into Supabase with individual item transaction isolation.
+ *
+ * Architecture & Real Transaction Boundary:
+ * Each tour update/insert executes via satf_mutate_tour_atomic RPC, which guarantees
+ * atomic consistency (tour write + audit log write in a single PostgreSQL transaction).
+ *
+ * If one record encounters a failure (e.g. malformed date or unique index conflict),
+ * that specific item is marked failed and recorded in the summary; it does NOT leave
+ * partial unlogged rows or corrupt other successfully committed tours in the batch.
+ *
+ * Coordinator-managed fields (guides, drivers, hotel confirmations, notes, manual cancellation)
+ * are defended and merged prior to write, ensuring re-import never wipes operational progress.
+ */
+export async function batchUpsertPersistentTours(
+  incomingTours: Tour[],
+  existingTours: Tour[],
+  operator: string = "coordinator"
+): Promise<BatchCommitSummary> {
+  const summary: BatchCommitSummary = {
+    totalAttempted: incomingTours.length,
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    items: [],
+    success: true,
+  };
+
+  const existingById = new Map<string, Tour>();
+  const existingBySource = new Map<string, Tour>();
+  const existingByRef = new Map<string, Tour[]>();
+
+  for (const t of existingTours) {
+    existingById.set(t.id.toLowerCase().trim(), t);
+    if (t.sourceRecordId) {
+      existingBySource.set(t.sourceRecordId.toLowerCase().trim(), t);
+    }
+    const ref = t.bookingReference.toLowerCase().trim();
+    if (!existingByRef.has(ref)) existingByRef.set(ref, []);
+    existingByRef.get(ref)!.push(t);
+  }
+
+  for (const inc of incomingTours) {
+    const ref = inc.bookingReference.trim();
+    const sourceRecordId = inc.sourceRecordId || `${inc.sourceSheet || "SOURCE"}:R${inc.sourceRow || 0}:${ref}`;
+
+    // 1. Identify existing record by exact ID first, sourceRecordId second, single-ref match third
+    let exist: Tour | undefined = existingById.get(inc.id.toLowerCase().trim());
+    if (!exist && inc.sourceRecordId) {
+      exist = existingBySource.get(inc.sourceRecordId.toLowerCase().trim());
+    }
+    if (!exist) {
+      const matches = existingByRef.get(ref.toLowerCase().trim()) || [];
+      if (matches.length === 1) {
+        exist = matches[0];
+      }
+    }
+
+    // 2. Decide action: insert vs update vs skip
+    if (!exist) {
+      // New record insert
+      const res = await createPersistentTour(inc, operator);
+      if (res.success && res.data) {
+        summary.inserted++;
+        summary.items.push({
+          sourceRecordId,
+          bookingReference: ref,
+          action: "inserted",
+          tourId: res.data.id,
+        });
+      } else {
+        summary.failed++;
+        summary.success = false;
+        summary.items.push({
+          sourceRecordId,
+          bookingReference: ref,
+          action: "failed",
+          tourId: inc.id,
+          error: res.error || "Failed to insert new record via atomic RPC",
+        });
+      }
+    } else {
+      // Check if unchanged and has no overrides to apply
+      const hasDriver = exist.assignments?.some((a) => a.role === "driver" && a.name);
+      const hasHotel = exist.hotels?.some((h) => Boolean(h.confirmationNumber));
+      const hasNotes = Boolean(exist.operationalNotes && exist.operationalNotes !== inc.operationalNotes);
+      const hasIssues = (exist.issues?.length || 0) > 0;
+      const isCancelled = exist.status === "cancelled";
+      const hasOverrides = hasDriver || hasHotel || hasNotes || hasIssues || isCancelled;
+
+      const isIdentical =
+        exist.arrivalDate === inc.arrivalDate &&
+        exist.departureDate === inc.departureDate &&
+        exist.group.adultCount === inc.group.adultCount &&
+        exist.hotels.length === inc.hotels.length &&
+        !hasNotes;
+
+      if (isIdentical && !hasOverrides) {
+        summary.skipped++;
+        summary.items.push({
+          sourceRecordId,
+          bookingReference: ref,
+          action: "skipped",
+          tourId: exist.id,
+        });
+        continue;
+      }
+
+      // Merge coordinator fields into incoming record preserving tour identity and operational inputs
+      const merged = mergeCoordinatorFields(inc, exist);
+      merged.id = exist.id;
+
+      const res = await updatePersistentTour(merged, undefined, operator);
+      if (res.success && res.data) {
+        summary.updated++;
+        summary.items.push({
+          sourceRecordId,
+          bookingReference: ref,
+          action: "updated",
+          tourId: res.data.id,
+        });
+      } else {
+        summary.failed++;
+        summary.success = false;
+        summary.items.push({
+          sourceRecordId,
+          bookingReference: ref,
+          action: "failed",
+          tourId: exist.id,
+          error: res.error || "Failed to update record via atomic RPC",
+        });
+      }
+    }
+  }
+
+  return summary;
 }

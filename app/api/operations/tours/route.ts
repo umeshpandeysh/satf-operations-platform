@@ -4,7 +4,7 @@ import {
   getDatabaseConfigStatus,
   createPersistentTour,
 } from "@/lib/operational-store";
-import { validateNewTourForm, createNewTour, type NewTourInput } from "@/lib/operations";
+import { validateNewTourForm, createNewTour, computeTourLifecycleStatus, type NewTourInput } from "@/lib/operations";
 import { getBaseTours, getEffectiveServerTours } from "@/lib/server-tours";
 import type { Tour } from "@/lib/types";
 
@@ -122,7 +122,11 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      tourToCreate = body.tour as Tour;
+      const rawTour = body.tour as Tour;
+      tourToCreate = {
+        ...rawTour,
+        status: computeTourLifecycleStatus(rawTour),
+      };
     } else {
       return NextResponse.json(
         { success: false, error: "Missing 'tour' or 'newTourInput' in request body." },

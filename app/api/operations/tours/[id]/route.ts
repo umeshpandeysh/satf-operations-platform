@@ -18,7 +18,7 @@ interface RouteContext {
 /**
  * GET /api/operations/tours/[id]
  *
- * Retrieve a specific operational tour record by ID.
+ * Retrieve a specific operational tour record by ID or booking reference.
  * Protected by operator authentication.
  */
 export async function GET(req: NextRequest, { params }: RouteContext) {
@@ -128,7 +128,32 @@ export async function PUT(req: NextRequest, { params }: RouteContext) {
     }
 
     const operator = auth.payload?.operator || "coordinator";
-    const updateRes = await updatePersistentTour(tour as Tour, expectedLastUpdated, operator);
+
+    // Defensively preserve existing sourceRecordId and operational fields
+    // if a partial or legacy update payload is submitted without source identity.
+    let tourToSave = tour as Tour;
+    if (!tour.sourceRecordId || !tour.arrivalDate || !tour.departureDate || !tour.group) {
+      const existing = await getPersistentTourById(id);
+      if (existing.success && existing.data) {
+        tourToSave = {
+          ...existing.data,
+          ...tour,
+          sourceRecordId: tour.sourceRecordId || existing.data.sourceRecordId,
+          trainJourneys:
+            tour.trainJourneys && tour.trainJourneys.length > 0
+              ? tour.trainJourneys
+              : existing.data.trainJourneys,
+          sourceSheet: tour.sourceSheet || existing.data.sourceSheet,
+          sourceRow: tour.sourceRow ?? existing.data.sourceRow,
+          sourceSheets: tour.sourceSheets || existing.data.sourceSheets,
+          originalArrivalDate: tour.originalArrivalDate || existing.data.originalArrivalDate,
+          dateCorrectionReason: tour.dateCorrectionReason || existing.data.dateCorrectionReason,
+          hasCancellationIndicator: tour.hasCancellationIndicator ?? existing.data.hasCancellationIndicator,
+        };
+      }
+    }
+
+    const updateRes = await updatePersistentTour(tourToSave, expectedLastUpdated, operator);
     if (!updateRes.success) {
       if (updateRes.conflict) {
         return NextResponse.json(
@@ -170,7 +195,7 @@ export async function PUT(req: NextRequest, { params }: RouteContext) {
  */
 export async function POST(req: NextRequest, { params }: RouteContext) {
   try {
-    const auth = authenticateOperatorRequest(req);
+    const auth = authenticateOperatorRequest(req, { requiredRole: "lead_coordinator" });
     if (!auth.authorized) {
       return NextResponse.json(
         { success: false, error: auth.error || "Authentication required." },

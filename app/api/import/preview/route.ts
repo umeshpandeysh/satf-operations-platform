@@ -7,7 +7,10 @@ import {
   MAX_WORKBOOK_SIZE_BYTES,
 } from "@/lib/excel-parser";
 import { authenticateOperatorRequest } from "@/lib/auth";
-import type { ImportPreviewResult } from "@/lib/types";
+import type { ImportPreviewResult, Tour } from "@/lib/types";
+import { compareIncomingWithExisting } from "@/lib/operations";
+import { getPersistentTours, getDatabaseConfigStatus } from "@/lib/operational-store";
+import { getCanonicalDataset } from "@/lib/canonical-store";
 
 export const dynamic = "force-dynamic";
 
@@ -154,6 +157,41 @@ export async function POST(req: NextRequest) {
         },
         { status: 400 }
       );
+    }
+
+    // 6. Safe Read-Only Comparison with Current Operational Dataset (Zero Mutations)
+    let existingTours: Tour[] = [];
+    let comparedAgainst: "none" | "persistent_database" | "canonical_store" = "none";
+
+    const dbStatus = getDatabaseConfigStatus();
+    if (dbStatus.configured) {
+      try {
+        const dbRes = await getPersistentTours();
+        if (dbRes.success && dbRes.data) {
+          existingTours = dbRes.data;
+          comparedAgainst = "persistent_database";
+        }
+      } catch (err) {
+        console.warn("Notice: could not query persistent database for import preview comparison:", err);
+      }
+    }
+
+    if (comparedAgainst === "none") {
+      try {
+        const canonical = getCanonicalDataset();
+        if (canonical && Array.isArray(canonical.tours)) {
+          existingTours = canonical.tours;
+          comparedAgainst = "canonical_store";
+        }
+      } catch {
+        // Safe degradation: comparison optional
+      }
+    }
+
+    if (comparedAgainst !== "none") {
+      const comparison = compareIncomingWithExisting(preview.tours, existingTours, comparedAgainst);
+      preview.existingComparison = comparison;
+      preview.summary.existingComparison = comparison;
     }
 
     return NextResponse.json(preview);

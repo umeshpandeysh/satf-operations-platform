@@ -1,54 +1,42 @@
 "use client";
 
-import { useState, Suspense } from "react";
-import { Sidebar, Header } from "./Navigation";
+import { Suspense } from "react";
+import Image from "next/image";
+import { TopNavBar } from "./TopNavBar";
+import { Footer } from "./Footer";
 
-function SidebarFallback() {
+function TopNavBarFallback() {
   return (
-    <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-200/90 shrink-0">
-      <div className="flex items-center gap-2.5 h-14 px-4 border-b border-slate-200/90 shrink-0 bg-slate-50/50">
-        <div className="flex items-center justify-center w-7 h-7 rounded bg-blue-700 text-white text-[11px] font-bold tracking-wider shrink-0 shadow-xs">
-          ST
-        </div>
-        <div>
-          <p className="text-xs font-bold text-slate-900 leading-none">SATF Operations</p>
-          <p className="text-[10px] text-slate-500 mt-0.5 leading-none">South Asia Travel Factory</p>
+    <header className="sticky top-0 z-40 w-full h-16 bg-white/95 border-b border-slate-200 px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+      <div className="flex items-center gap-2.5">
+        <Image
+          src="/satf-logo.png"
+          alt="SATF"
+          width={36}
+          height={36}
+          className="h-9 w-auto max-h-9 object-contain"
+        />
+        <div className="flex flex-col">
+          <span className="font-bold text-slate-900 text-sm tracking-tight leading-tight">SATF Operations</span>
+          <span className="text-[10px] text-slate-500 font-medium leading-none">South Asia Tour Desk</span>
         </div>
       </div>
-    </aside>
-  );
-}
-
-function HeaderFallback() {
-  return (
-    <header className="sticky top-0 z-30 h-14 flex items-center bg-white border-b border-slate-200/90 px-4 sm:px-6 shrink-0">
-      <div className="flex-1 min-w-0">
-        <h1 className="text-xs sm:text-sm font-semibold text-slate-900">SATF Operations Command</h1>
-      </div>
+      <div className="w-5 h-5 border-2 border-slate-300 border-t-blue-700 rounded-full animate-spin" />
     </header>
   );
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
-      <Suspense fallback={<SidebarFallback />}>
-        <Sidebar
-          open={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-        />
+    <div className="min-h-screen flex flex-col bg-slate-50/70 text-slate-900">
+      <Suspense fallback={<TopNavBarFallback />}>
+        <TopNavBar />
       </Suspense>
-
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Suspense fallback={<HeaderFallback />}>
-          <Header onMenuToggle={() => setSidebarOpen((v) => !v)} />
-        </Suspense>
-        <main className="flex-1 overflow-y-auto bg-slate-50/60 focus:outline-none">
-          {children}
-        </main>
-      </div>
+      <main className="flex-1 w-full focus:outline-none">
+        {children}
+      </main>
+      <Footer />
     </div>
   );
 }
+

@@ -15,6 +15,9 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     authenticated: true,
     operator: auth.payload.operator,
+    username: auth.payload.username,
+    role: auth.payload.role || "coordinator",
+    mfaVerified: auth.payload.mfaVerified ?? false,
     csrfToken: auth.payload.csrfToken,
     expiresAt: new Date(auth.payload.exp).toISOString(),
   });

@@ -154,6 +154,20 @@ export interface OperationalIssue {
   resolvedAt?: string;
 }
 
+export interface TrainJourney {
+  id: string;
+  date: string;
+  trainName: string;
+  trainNumber?: string;
+  fromStation?: string;
+  toStation?: string;
+  travelClass?: string;
+  departureTime?: string;
+  arrivalTime?: string;
+  pnr?: string;
+  rawText: string;
+}
+
 // ─── Primary Tour entity ─────────────────────────────────────────────────────
 
 export interface Tour {
@@ -173,6 +187,8 @@ export interface Tour {
   itinerary: ItineraryEntry[];
   assignments: ResourceAssignment[];
   specialRequests: SpecialRequest[];
+  /** Structured railway journeys extracted from itinerary cells without altering original text */
+  trainJourneys?: TrainJourney[];
   /** Discrete operational issues tracking independent blockers */
   issues?: OperationalIssue[];
   /** Provenance reference to legacy Excel sheet & row where applicable */
@@ -180,9 +196,16 @@ export interface Tour {
   sourceSheet?: string;
   sourceRow?: number;
   sourceSheets?: string[];
+  /** Stable source record coordinate distinguishing repeated booking references */
+  sourceRecordId?: string;
   rawArrivalSerial?: number | string;
   hasDateAmbiguity?: boolean;
   dateAmbiguityReason?: string;
+  originalArrivalDate?: string;
+  dateCorrectionReason?: string;
+  /** Flag for suspected cancellation without mutating operational status */
+  hasCancellationIndicator?: boolean;
+  cancellationIndicatorReason?: string;
   agency?: string;
   packageCode?: string;
   isImported?: boolean;
@@ -205,6 +228,57 @@ export interface SheetImportDetail {
   toursCount: number;
 }
 
+export interface ExcludedSheetDetail {
+  sheetName: string;
+  reason: string;
+  rowCount: number;
+}
+
+export interface CorrectedDateItem {
+  bookingReference: string;
+  sourceRecordId?: string;
+  sheet: string;
+  row: number;
+  originalDate: string;
+  correctedDate: string;
+  rule: string;
+  reason: string;
+}
+
+export interface PossibleCancellationItem {
+  bookingReference: string;
+  sourceRecordId?: string;
+  sheet: string;
+  row: number;
+  guestMasked: string;
+  reason: string;
+  rawText: string;
+}
+
+export interface SeasonGroupSummary {
+  season: string;
+  tourCount: number;
+  sheetsCount: number;
+}
+
+export interface ExistingComparisonItem {
+  sourceRecordId: string;
+  bookingReference: string;
+  guestMasked: string;
+  action: "insert" | "update" | "skip" | "conflict";
+  reason: string;
+  hasCoordinatorOverrides?: boolean;
+}
+
+export interface ExistingComparisonDetail {
+  comparedAgainst: "none" | "persistent_database" | "canonical_store";
+  wouldInsertCount: number;
+  wouldUpdateCount: number;
+  wouldSkipCount: number;
+  flaggedConflictCount: number;
+  details: ExistingComparisonItem[];
+}
+
 export interface ImportSummary {
   workbookName: string;
   importTimestamp: string;
@@ -218,21 +292,45 @@ export interface ImportSummary {
   dateAmbiguityCount: number;
   unassignedGuidesCount: number;
   sheetsSummary: SheetImportDetail[];
+  excludedSheetsCount?: number;
+  excludedSheets?: ExcludedSheetDetail[];
+  correctedDatesCount?: number;
+  possibleCancellationsCount?: number;
+  preservedDistinctCount?: number;
+  seasons?: SeasonGroupSummary[];
+  existingComparison?: ExistingComparisonDetail;
 }
 
 export interface ImportAmbiguityItem {
   bookingReference: string;
+  sourceRecordId?: string;
   sheet: string;
   row: number;
   reason: string;
   rawSerial?: number | string;
+  guestMasked?: string;
+}
+
+export type DateAmbiguity = ImportAmbiguityItem;
+
+export interface CoordinatorDateDecision {
+  bookingReference: string;
+  sourceRecordId?: string;
+  decision: "confirm_inferred" | "override";
+  confirmedArrivalDate: string; // YYYY-MM-DD
+  notes?: string;
+  approvalSource?: "manual_coordinator" | "batch_confirmed" | "simulated";
+  approvedBy?: string;
+  approvedAt?: string;
 }
 
 export interface ImportDuplicateItem {
   bookingReference: string;
   sheets: string[];
   rows: number[];
-  resolution: "merged_spanning" | "amended" | "skipped_duplicate";
+  resolution: "merged_spanning" | "amended" | "skipped_duplicate" | "preserved_distinct";
+  guestMasked?: string;
+  reason?: string;
 }
 
 export interface ImportErrorItem {
@@ -248,6 +346,10 @@ export interface ImportPreviewResult {
   ambiguities: ImportAmbiguityItem[];
   duplicates: ImportDuplicateItem[];
   errors: ImportErrorItem[];
+  excludedSheets?: ExcludedSheetDetail[];
+  correctedDates?: CorrectedDateItem[];
+  possibleCancellations?: PossibleCancellationItem[];
+  existingComparison?: ExistingComparisonDetail;
 }
 
 

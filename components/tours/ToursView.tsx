@@ -42,15 +42,7 @@ import {
   nightsBetween,
   relativeDayLabel,
 } from "@/lib/utils";
-
-const STATUS_TABS: Array<{ value: TourStatus | "all"; label: string }> = [
-  { value: "all", label: "All Tours" },
-  { value: "active", label: "Active" },
-  { value: "upcoming", label: "Upcoming" },
-  { value: "attention", label: "Needs Attention" },
-  { value: "completed", label: "Completed" },
-  { value: "cancelled", label: "Cancelled" },
-];
+import { useLanguage } from "@/lib/i18n";
 
 export interface ToursViewProps {
   initialTours: Tour[];
@@ -58,6 +50,17 @@ export interface ToursViewProps {
 }
 
 export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
+  const { t, language } = useLanguage();
+
+  const statusTabs: Array<{ value: TourStatus | "all"; label: string }> = [
+    { value: "all", label: t("tours.filter_all") },
+    { value: "active", label: t("tours.filter_active") },
+    { value: "upcoming", label: t("tours.filter_upcoming") },
+    { value: "attention", label: t("tours.filter_attention") },
+    { value: "completed", label: t("tours.filter_completed") },
+    { value: "cancelled", label: t("tours.filter_cancelled") },
+  ];
+
   const sessionRaw = useSyncExternalStore(
     subscribeSessionStore,
     getSessionSnapshot,
@@ -81,6 +84,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
   }, [initialTours, sessionTours, createdTours]);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [yearFilter, setYearFilter] = useState<string>("current");
   const [statusFilter, setStatusFilter] = useState<TourStatus | "all">("all");
   const [sheetFilter, setSheetFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
@@ -94,35 +98,57 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
 
   const hasImportedTours = useMemo(() => tours.some((t) => t.isImported), [tours]);
 
+  const availableYears = useMemo(() => {
+    const yrs = new Set<string>();
+    tours.forEach((t) => {
+      if (t.arrivalDate) yrs.add(t.arrivalDate.slice(0, 4));
+      if (t.departureDate) yrs.add(t.departureDate.slice(0, 4));
+    });
+    return Array.from(yrs).filter(Boolean).sort().reverse();
+  }, [tours]);
+
+  // Operational year subset (defaults to current 2025-2026 operations)
+  const yearTours = useMemo(() => {
+    if (yearFilter === "all") return tours;
+    return tours.filter((tour) => {
+      const arrY = tour.arrivalDate?.slice(0, 4);
+      const depY = tour.departureDate?.slice(0, 4);
+      if (yearFilter === "current") {
+        return arrY === "2025" || arrY === "2026" || depY === "2025" || depY === "2026";
+      }
+      return arrY === yearFilter || depY === yearFilter;
+    });
+  }, [tours, yearFilter]);
+
   const sheets = useMemo(() => {
     const s = new Set<string>();
-    tours.forEach((t) => {
+    yearTours.forEach((t) => {
       if (t.sourceSheet) s.add(t.sourceSheet);
     });
     return Array.from(s).sort();
-  }, [tours]);
+  }, [yearTours]);
 
-  // Live status counts
+  // Live status counts scoped to selected operational period
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {
-      all: tours.length,
+      all: yearTours.length,
       active: 0,
       upcoming: 0,
       attention: 0,
       completed: 0,
       cancelled: 0,
     };
-    tours.forEach((t) => {
+    yearTours.forEach((t) => {
       if (counts[t.status] !== undefined) {
         counts[t.status]++;
       }
     });
     return counts;
-  }, [tours]);
+  }, [yearTours]);
 
   const filtered = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    return tours.filter((tour) => {
+    return yearTours.filter((tour) => {
       const matchesStatus =
         statusFilter === "all" || tour.status === statusFilter;
       const matchesSheet =
@@ -137,14 +163,25 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
         tour.assignments.some((a) => a.name?.toLowerCase().includes(q));
       return matchesStatus && matchesSheet && matchesSearch;
     });
-  }, [tours, searchQuery, statusFilter, sheetFilter]);
+  }, [yearTours, searchQuery, statusFilter, sheetFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  // Sort: active first, upcoming next, attention, completed (most recent arrival date first)
+  const sortedTours = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const priority = (s: TourStatus) =>
+        s === "active" ? 0 : s === "upcoming" ? 1 : s === "attention" ? 2 : 3;
+      const pDiff = priority(a.status) - priority(b.status);
+      if (pDiff !== 0) return pDiff;
+      return b.arrivalDate.localeCompare(a.arrivalDate);
+    });
+  }, [filtered]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedTours.length / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const paginatedTours = useMemo(() => {
     const start = (safeCurrentPage - 1) * pageSize;
-    return filtered.slice(start, start + pageSize);
-  }, [filtered, safeCurrentPage, pageSize]);
+    return sortedTours.slice(start, start + pageSize);
+  }, [sortedTours, safeCurrentPage, pageSize]);
 
   return (
     <PageContainer>
@@ -166,6 +203,30 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
         </div>
       )}
 
+      {/* Operational database empty banner */}
+      {tours.length === 0 && (
+        <div className="bg-blue-50/80 border border-blue-200/90 rounded-lg p-3.5 text-xs text-blue-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start gap-2.5">
+            <Compass size={18} className="text-blue-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-sm text-blue-950">
+                Operational Database Empty (0 Active Tours)
+              </p>
+              <p className="text-blue-800 text-[11px] mt-0.5">
+                The database currently contains zero tour records. 1,757 tours from the staged SATF workbook are available in Import Review for date decisions and dry-run reconciliation.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/import/review"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-700 hover:bg-blue-800 text-white font-semibold text-xs shrink-0 transition-colors shadow-xs"
+          >
+            Review Staged Workbook
+            <ChevronRight size={13} />
+          </Link>
+        </div>
+      )}
+
       {/* Session storage read failure alert */}
       {sessionState.status === "error" && (
         <div
@@ -180,7 +241,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
       )}
 
       {/* ── Filter & Search Control Panel ───────────────────────────────────── */}
-      <div className="bg-white border border-slate-200/90 rounded-lg p-3.5 shadow-xs space-y-3">
+      <div className="bg-white surface-card border border-slate-200/85 rounded-xl p-3.5 shadow-2xs space-y-3 overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           {/* Search Input */}
           <div className="relative flex-1 max-w-md">
@@ -191,13 +252,13 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
             />
             <input
               type="search"
-              placeholder="Filter by ref, group, destination, guide, or nationality…"
+              placeholder={t("tours.search_placeholder")}
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full pl-9 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-300/80 rounded-md text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors"
+              className="w-full pl-9 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-300/80 rounded-lg text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#244d70] transition-colors"
               aria-label="Filter tours"
             />
             {searchQuery && (
@@ -215,10 +276,38 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
             )}
           </div>
 
+          {/* Operational Period Filter */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              {language === "ja" ? "対象期間:" : "Period:"}
+            </span>
+            <select
+              value={yearFilter}
+              onChange={(e) => {
+                setYearFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              aria-label="Filter by operational period"
+              className="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-[#244d70] cursor-pointer shadow-2xs"
+            >
+              <option value="current">
+                {language === "ja" ? "現行運行 (2025–2026)" : "Current Operations (2025–2026)"}
+              </option>
+              <option value="all">
+                {language === "ja" ? "全年度・全記録 (2016–2026)" : "All Years (Complete Archive)"}
+              </option>
+              {availableYears.map((yr) => (
+                <option key={yr} value={yr}>
+                  {yr}{language === "ja" ? "年度" : " Operations"}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Reference Date Context */}
           <div className="text-right text-[11px] text-slate-500 flex items-center justify-end gap-1.5">
             <Calendar size={13} className="text-slate-400 shrink-0" />
-            <span>Operational Base Date:</span>
+            <span>{language === "ja" ? "運行基準日:" : "Operational Base Date:"}</span>
             <strong className="font-mono text-slate-700">
               {formatDate(referenceDate)}
             </strong>
@@ -229,9 +318,9 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
         <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100" role="group" aria-label="Status filter">
           <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1">
             <SlidersHorizontal size={12} />
-            <span>Status:</span>
+            <span>{language === "ja" ? "状態:" : "Status:"}</span>
           </div>
-          {STATUS_TABS.map((tab) => {
+          {statusTabs.map((tab) => {
             const count = statusCounts[tab.value] ?? 0;
             const isSelected = statusFilter === tab.value;
             return (
@@ -242,10 +331,10 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                   setCurrentPage(1);
                 }}
                 className={cn(
-                  "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+                  "inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#244d70] btn-press",
                   isSelected
-                    ? "bg-blue-600 text-white shadow-xs font-semibold"
-                    : "bg-slate-100/80 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
+                    ? "bg-[#244d70] text-white shadow-2xs font-semibold"
+                    : "bg-slate-100/90 text-slate-600 hover:bg-slate-200/90 hover:text-[#172d43]"
                 )}
                 aria-pressed={isSelected}
               >
@@ -254,7 +343,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                   className={cn(
                     "text-[10px] px-1.5 py-0.2 rounded-full tabular-nums font-mono",
                     isSelected
-                      ? "bg-blue-700/80 text-white"
+                      ? "bg-white/20 text-white"
                       : "bg-white text-slate-500 border border-slate-200"
                   )}
                 >
@@ -273,7 +362,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                   setSheetFilter(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="bg-slate-50 border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="bg-slate-50 border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-[#244d70]"
               >
                 <option value="all">All Sheets ({sheets.length})</option>
                 {sheets.map((s) => (
@@ -294,64 +383,96 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
       )}
 
       {/* ── Operational Data Table ─────────────────────────────────────────── */}
-      <Card>
+      <Card className="overflow-hidden surface-card border-slate-200/90 shadow-2xs">
         <CardHeader className="bg-slate-50/50 py-2.5 px-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-              Active Tour Operations Roster
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[#172d43]">
+              {t("tours.active_roster")}
             </h2>
             <Badge variant="neutral" className="font-mono text-[10px]">
-              {filtered.length} {filtered.length === 1 ? "record" : "records"}
+              {filtered.length} {language === "ja" ? "件" : filtered.length === 1 ? "record" : "records"}
             </Badge>
           </div>
           <div className="flex items-center gap-3">
             <span className="text-[11px] text-slate-400 hidden sm:inline">
-              Click row to open operations file
+              {language === "ja" ? "行をクリックして詳細を表示" : "Click row to open operations file"}
             </span>
             <button
               type="button"
               onClick={() => setIsCreateOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#244d70] hover:bg-[#1b3b57] rounded-lg shadow-2xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#244d70] btn-press"
             >
               <PlusCircle size={13} />
-              <span>New Tour</span>
+              <span>{t("tours.new_tour")}</span>
             </button>
           </div>
         </CardHeader>
 
-        {filtered.length === 0 ? (
+        {tours.length === 0 ? (
           <EmptyState
             icon={Compass}
-            title="No tours match current filters"
-            description="Adjust your search terms or status filter to locate the operational tour record."
+            title={language === "ja" ? "運行台帳にデータがありません" : "Operational Database Empty"}
+            description={
+              language === "ja"
+                ? "現在、ツアーデータは登録されていません。インポート確認画面からワークブックの確認を行ってください。"
+                : "The live database contains zero tour records. 1,757 tours from the staged SATF workbook are available in Import Review for date decisions and dry-run reconciliation."
+            }
+            action={
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/import/review"
+                  className="px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-md transition-colors shadow-xs"
+                >
+                  {language === "ja" ? "インポート確認を開く" : "Open Excel Import Review"}
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setIsCreateOpen(true)}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md border border-slate-300 transition-colors"
+                >
+                  {language === "ja" ? "手動登録" : "Create Manual Tour"}
+                </button>
+              </div>
+            }
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={Compass}
+            title={language === "ja" ? "該当するツアーが見つかりません" : "No tours match current filters"}
+            description={
+              language === "ja"
+                ? "検索条件や状態フィルターを変更してください。"
+                : "Adjust your search terms or status filter to locate the operational tour record."
+            }
             action={
               <button
                 type="button"
                 onClick={() => {
                   setSearchQuery("");
                   setStatusFilter("all");
+                  setSheetFilter("all");
                 }}
                 className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md border border-blue-200 transition-colors"
               >
-                Reset all filters
+                {t("tours.reset_filters")}
               </button>
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto w-full max-w-full">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="bg-slate-50/70 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                  <th className="py-2.5 px-3 whitespace-nowrap">Reference</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Group / Party</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap hidden sm:table-cell">Circuit Destination</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap hidden md:table-cell">Schedule (Arr → Dep)</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap hidden lg:table-cell">Guide</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap hidden xl:table-cell">Vehicle / Fleet</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Status</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap hidden sm:table-cell">Readiness</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">{t("tours.col_ref")}</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">{t("tours.col_guest")}</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap hidden sm:table-cell">{t("tours.col_dest")}</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap hidden md:table-cell">{t("tours.col_dates")}</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap hidden lg:table-cell">{t("tours.col_guide")}</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap hidden xl:table-cell">{t("tours.col_driver")}</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap">{t("tours.col_status")}</th>
+                  <th className="py-2.5 px-3 whitespace-nowrap hidden sm:table-cell">{language === "ja" ? "手配状況" : "Readiness"}</th>
                   <th className="py-2.5 px-3 text-right">
-                    <span className="sr-only">Actions</span>
+                    <span className="sr-only">{t("tours.col_actions")}</span>
                   </th>
                 </tr>
               </thead>
@@ -368,15 +489,15 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                     <tr
                       key={tour.id}
                       className={cn(
-                        "group hover:bg-blue-50/30 transition-colors",
+                        "group hover:bg-[#dcecf7]/20 transition-colors",
                         isAttention && "bg-amber-50/20"
                       )}
                     >
                       {/* Booking Reference */}
-                      <td className="py-2.5 px-3 font-mono text-xs font-bold text-blue-700 whitespace-nowrap">
+                      <td className="py-2.5 px-3 font-mono text-xs font-bold text-[#244d70] whitespace-nowrap">
                         <Link
                           href={`/tours/${tour.id}`}
-                          className="hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded block"
+                          className="hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#244d70] rounded block"
                         >
                           {tour.bookingReference}
                         </Link>
@@ -386,7 +507,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                               {tour.sourceSheet}:{tour.sourceRow}
                             </span>
                             {tour.agency && (
-                              <span className="text-[9px] font-mono font-bold text-blue-700 bg-blue-50 px-1 py-0.2 rounded">
+                              <span className="text-[9px] font-mono font-bold text-[#244d70] bg-[#dcecf7]/60 px-1 py-0.2 rounded">
                                 {tour.agency}
                               </span>
                             )}
@@ -443,7 +564,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                           </div>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
-                            Unassigned
+                            {t("assign.status_unassigned")}
                           </span>
                         )}
                       </td>
@@ -457,7 +578,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                           </span>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-0.5 font-mono truncate max-w-[120px]">
-                          {driver?.name || "Driver pending"}
+                          {driver?.name || (language === "ja" ? "ドライバー手配中" : "Driver pending")}
                         </p>
                       </td>
 
@@ -471,11 +592,11 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                         {openIssuesCount > 0 ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
                             <AlertCircle size={11} className="text-red-600" />
-                            {openIssuesCount} {openIssuesCount === 1 ? "Blocker" : "Blockers"}
+                            {openIssuesCount} {t("tours.blocker")}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                            Ready
+                            {t("tours.ready")}
                           </span>
                         )}
                       </td>
@@ -484,10 +605,10 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                       <td className="py-2.5 px-3 text-right whitespace-nowrap">
                         <Link
                           href={`/tours/${tour.id}`}
-                          className="inline-flex items-center gap-0.5 px-2 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
+                          className="inline-flex items-center gap-0.5 px-2.5 py-1 text-xs font-semibold text-[#244d70] hover:text-[#172d43] hover:bg-[#dcecf7]/50 rounded-lg transition-colors btn-press"
                           aria-label={`Open tour ${tour.bookingReference}`}
                         >
-                          <span>Open</span>
+                          <span>{t("tours.open")}</span>
                           <ChevronRight size={13} />
                         </Link>
                       </td>
@@ -503,9 +624,11 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
         {filtered.length > pageSize && (
           <div className="p-3 border-t border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
             <span className="text-slate-600 font-medium">
-              Showing <strong className="text-slate-900 font-mono">{(currentPage - 1) * pageSize + 1}</strong> to{" "}
-              <strong className="text-slate-900 font-mono">{Math.min(currentPage * pageSize, filtered.length)}</strong> of{" "}
-              <strong className="text-slate-900 font-mono">{filtered.length}</strong> matching records
+              {t("pagination.showing")}{" "}
+              <strong className="text-slate-900 font-mono">{(currentPage - 1) * pageSize + 1}</strong>{" "}
+              {t("pagination.of")}{" "}
+              <strong className="text-slate-900 font-mono">{Math.min(currentPage * pageSize, filtered.length)}</strong>{" "}
+              ({filtered.length} {language === "ja" ? "件" : "records"})
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -514,10 +637,10 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                 disabled={currentPage === 1}
                 className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 disabled:opacity-40 hover:bg-slate-100 font-medium transition-colors"
               >
-                Previous
+                {t("pagination.prev")}
               </button>
               <span className="px-2 font-mono text-slate-700 font-semibold">
-                Page {currentPage} of {totalPages}
+                {t("pagination.page")} {currentPage} / {totalPages}
               </span>
               <button
                 type="button"
@@ -525,7 +648,7 @@ export function ToursView({ initialTours, referenceDate }: ToursViewProps) {
                 disabled={currentPage === totalPages}
                 className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 disabled:opacity-40 hover:bg-slate-100 font-medium transition-colors"
               >
-                Next
+                {t("pagination.next")}
               </button>
             </div>
           </div>

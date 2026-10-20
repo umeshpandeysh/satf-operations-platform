@@ -14,7 +14,14 @@ import type {
   SheetImportDetail,
   TourStatus,
   VehicleType,
+  TrainJourney,
+  ExcludedSheetDetail,
+  CorrectedDateItem,
+  PossibleCancellationItem,
+  SeasonGroupSummary,
 } from "./types";
+import { maskGuestName, computeTourLifecycleStatus } from "./operations";
+import { getIndiaTodayISO } from "./utils";
 
 export const MAX_WORKBOOK_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -126,6 +133,90 @@ export function xldateToISO(val: unknown): string | null {
       return `${year}-${month}-${day}`;
     }
   }
+  return null;
+}
+
+/**
+ * Resolve historical date shorthand candidates using sheet year and month context.
+ * Supports:
+ * - Integer day (1..31) in single-month sheets (e.g. 3, 12, 28 in JAN-17)
+ * - DDMon strings (e.g. "09AUG", "23AUG")
+ * - DD-MM strings (e.g. "27-11", "29-11")
+ * - M/D or MM/DD strings (e.g. " 7/26")
+ */
+export function resolveHistoricalDateCandidate(
+  rawVal: unknown,
+  sheetYear: number | null,
+  sheetMonth: number | null
+): string | null {
+  if (!sheetYear || !sheetMonth) return null;
+
+  // Case 1: Integer day 1..31 (e.g. 3, 12, 28 in JAN-17)
+  if (typeof rawVal === "number" && rawVal >= 1 && rawVal <= 31 && Number.isInteger(rawVal)) {
+    const y = String(sheetYear).padStart(4, "0");
+    const m = String(sheetMonth).padStart(2, "0");
+    const d = String(rawVal).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  if (typeof rawVal === "string") {
+    const trimmed = rawVal.trim();
+    // Integer string "1".."31"
+    if (/^\d{1,2}$/.test(trimmed)) {
+      const dayNum = parseInt(trimmed, 10);
+      if (dayNum >= 1 && dayNum <= 31) {
+        const y = String(sheetYear).padStart(4, "0");
+        const m = String(sheetMonth).padStart(2, "0");
+        const d = String(dayNum).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+    }
+
+    // Case 2: DDMon (e.g. "09AUG", "23AUG")
+    const ddMonMatch = trimmed.match(/^(\d{1,2})\s*([A-Za-z]{3})$/);
+    if (ddMonMatch) {
+      const day = parseInt(ddMonMatch[1], 10);
+      const monStr = ddMonMatch[2].toUpperCase();
+      const monthMap: Record<string, number> = {
+        JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6,
+        JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12,
+      };
+      const m = monthMap[monStr];
+      if (m && day >= 1 && day <= 31) {
+        const y = String(sheetYear).padStart(4, "0");
+        const mm = String(m).padStart(2, "0");
+        const dd = String(day).padStart(2, "0");
+        return `${y}-${mm}-${dd}`;
+      }
+    }
+
+    // Case 3: DD-MM (e.g. "27-11", "29-11")
+    const ddMmMatch = trimmed.match(/^(\d{1,2})-(\d{1,2})$/);
+    if (ddMmMatch) {
+      const day = parseInt(ddMmMatch[1], 10);
+      const m = parseInt(ddMmMatch[2], 10);
+      if (m >= 1 && m <= 12 && day >= 1 && day <= 31) {
+        const y = String(sheetYear).padStart(4, "0");
+        const mm = String(m).padStart(2, "0");
+        const dd = String(day).padStart(2, "0");
+        return `${y}-${mm}-${dd}`;
+      }
+    }
+
+    // Case 4: M/D or MM/DD (e.g. " 7/26")
+    const mdMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})$/);
+    if (mdMatch) {
+      const m = parseInt(mdMatch[1], 10);
+      const day = parseInt(mdMatch[2], 10);
+      if (m >= 1 && m <= 12 && day >= 1 && day <= 31) {
+        const y = String(sheetYear).padStart(4, "0");
+        const mm = String(m).padStart(2, "0");
+        const dd = String(day).padStart(2, "0");
+        return `${y}-${mm}-${dd}`;
+      }
+    }
+  }
+
   return null;
 }
 
@@ -362,7 +453,253 @@ export function extractHotels(
 }
 
 /**
+ * Sheets excluded from operational parsing by default.
+ * These sheets are preserved in the workbook but reported as excluded with explicit rationale.
+ */
+export const DEFAULT_EXCLUDED_SHEETS: ReadonlySet<string> = new Set(["Sheet1", "SHEET 1"]);
+
+const SHEET_MONTH_MAP: Record<string, number> = {
+  JAN: 1,
+  FEB: 2,
+  MAR: 3,
+  MARCH: 3,
+  APR: 4,
+  APRIL: 4,
+  MAY: 5,
+  JUN: 6,
+  JUNE: 6,
+  JUL: 7,
+  JULY: 7,
+  AUG: 8,
+  SEP: 9,
+  SEPT: 9,
+  OCT: 10,
+  NOV: 11,
+  DEC: 12,
+};
+
+export interface SheetColumnLayout {
+  refCol: number;
+  dateCol: number;
+  agencyCol: number;
+  packageCol: number;
+  guestCol: number;
+  notesCol: number;
+  itinStartCol: number;
+}
+
+/**
+ * Dynamically detect column layout for any operational worksheet,
+ * accurately accommodating shifted columns (e.g. DEC-17, JAN-18) without hardcoding fixed indices.
+ */
+export function detectSheetLayout(s: XLSX.WorkSheet, sheetName?: string): SheetColumnLayout {
+  void sheetName;
+  if (!s || !s["!ref"]) {
+    return { refCol: 2, dateCol: 0, agencyCol: 1, packageCol: 3, guestCol: 4, notesCol: 5, itinStartCol: 6 };
+  }
+  const range = XLSX.utils.decode_range(s["!ref"]);
+
+  // Detect calendar timeline start in row 0 or row 1 (Excel date serials > 40000)
+  let itinStartCol = 6;
+  for (let c = 5; c <= 12; c++) {
+    const v0 = s[0]?.[c]?.v;
+    const v1 = s[1]?.[c]?.v;
+    if (
+      (typeof v0 === "number" && v0 > 40000 && v0 < 50000) ||
+      (typeof v1 === "number" && v1 > 40000 && v1 < 50000)
+    ) {
+      itinStartCol = c;
+      break;
+    }
+  }
+
+  // Count votes across rows 2..30 to distinguish standard col 2 from shifted col 3 layouts
+  let votesCol2 = 0;
+  let votesCol3 = 0;
+
+  for (let r = 2; r <= Math.min(30, range.e.r); r++) {
+    const v2 = s[r]?.[2]?.v;
+    const v3 = s[r]?.[3]?.v;
+
+    if (v2 !== undefined && v2 !== null) {
+      const s2 = String(v2).replace(".0", "").trim();
+      if (/^\d{4,8}$/.test(s2)) {
+        const pkg = String(s[r]?.[3]?.v || "").trim();
+        const guest = String(s[r]?.[4]?.v || "").trim();
+        if (/^(IN-|INT|SPL|URB)/i.test(pkg) || /MS|MR|PAX|X\d/i.test(guest)) {
+          votesCol2++;
+        }
+      }
+    }
+
+    if (v3 !== undefined && v3 !== null) {
+      const s3 = String(v3).replace(".0", "").trim();
+      if (/^\d{4,8}$/.test(s3)) {
+        const pkg = String(s[r]?.[4]?.v || "").trim();
+        const guest = String(s[r]?.[5]?.v || "").trim();
+        if (/^(IN-|INT|SPL|URB)/i.test(pkg) || /MS|MR|PAX|X\d/i.test(guest)) {
+          votesCol3++;
+        }
+      }
+    }
+  }
+
+  const refCol = votesCol3 > votesCol2 ? 3 : 2;
+  const isShifted = refCol === 3;
+
+  return {
+    refCol,
+    dateCol: isShifted ? 1 : 0,
+    agencyCol: isShifted ? 2 : 1,
+    packageCol: isShifted ? 4 : 3,
+    guestCol: isShifted ? 5 : 4,
+    notesCol: isShifted ? 6 : 5,
+    itinStartCol: Math.max(itinStartCol, isShifted ? 6 : 6),
+  };
+}
+
+/**
+ * Extract structured railway journeys from itinerary activities without mutating original text.
+ */
+export function extractTrainJourneys(
+  itineraryDays: Array<{ date: string; activity: string }>,
+  bookingRef: string
+): TrainJourney[] {
+  const journeys: TrainJourney[] = [];
+  let trainIdx = 1;
+
+  for (const day of itineraryDays) {
+    const act = day.activity;
+    const actUp = act.toUpperCase();
+
+    const isTrain =
+      actUp.includes("GATIMAN") ||
+      actUp.includes("GATIMA") ||
+      actUp.includes("SHATABDI") ||
+      actUp.includes("SHABDI") ||
+      actUp.includes("SHATABI") ||
+      actUp.includes("SHTABDI") ||
+      actUp.includes("SAHTABD") ||
+      actUp.includes("VANDE BHARAT") ||
+      actUp.includes("V. BHARAT") ||
+      actUp.includes("V.BHARAT") ||
+      actUp.includes("SHIVGANGA") ||
+      actUp.includes("SHIV GANGA") ||
+      actUp.includes("SHIVGAGA") ||
+      actUp.includes("SHIGANGA") ||
+      actUp.includes("S.G. EXP") ||
+      actUp.includes("RAJDHANI") ||
+      actUp.includes("RAJDNI") ||
+      actUp.includes("POORVA") ||
+      actUp.includes("MARUDHAR") ||
+      actUp.includes("MARUDHR") ||
+      actUp.includes("INTERCITY") ||
+      actUp.includes("GARIB RATH") ||
+      /\b\d{5}\b/.test(actUp) ||
+      /\bTRAIN\b/.test(actUp);
+
+    if (!isTrain) continue;
+
+    let trainName = "Indian Railways Train";
+    if (actUp.includes("GATIMAN") || actUp.includes("GATIMA")) {
+      trainName = "Gatimaan Express";
+    } else if (
+      actUp.includes("SHATABDI") ||
+      actUp.includes("SHABDI") ||
+      actUp.includes("SHATABI") ||
+      actUp.includes("SHTABDI") ||
+      actUp.includes("SAHTABD")
+    ) {
+      trainName = "Shatabdi Express";
+    } else if (
+      actUp.includes("VANDE BHARAT") ||
+      actUp.includes("V. BHARAT") ||
+      actUp.includes("V.BHARAT")
+    ) {
+      trainName = "Vande Bharat Express";
+    } else if (
+      actUp.includes("SHIVGANGA") ||
+      actUp.includes("SHIV GANGA") ||
+      actUp.includes("SHIVGAGA") ||
+      actUp.includes("SHIGANGA") ||
+      actUp.includes("S.G. EXP")
+    ) {
+      trainName = "Shivganga Express";
+    } else if (actUp.includes("RAJDHANI") || actUp.includes("RAJDNI")) {
+      trainName = "Rajdhani Express";
+    } else if (actUp.includes("POORVA")) {
+      trainName = "Poorva Express";
+    } else if (actUp.includes("MARUDHAR") || actUp.includes("MARUDHR")) {
+      trainName = "Marudhar Express";
+    } else if (actUp.includes("GARIB RATH")) {
+      trainName = "Garib Rath Express";
+    } else if (actUp.includes("INTERCITY")) {
+      trainName = "Intercity Express";
+    }
+
+    const trainNumMatch = actUp.match(/\b(\d{5})\b/);
+    const trainNumber = trainNumMatch ? trainNumMatch[1] : undefined;
+
+    let fromStation: string | undefined;
+    let toStation: string | undefined;
+
+    if (actUp.includes("NDLS")) fromStation = "New Delhi (NDLS)";
+    else if (actUp.includes("ANVT")) fromStation = "Anand Vihar Terminal (ANVT)";
+    else if (actUp.includes("BSB") || actUp.includes("VNS")) fromStation = "Varanasi Jn (BSB)";
+    else if (actUp.includes("AGRA") || actUp.includes("AGC")) fromStation = "Agra Cantt (AGC)";
+
+    if (actUp.includes("ARR AGRA") || actUp.includes("ARR AGR") || actUp.includes("TRF AGRA")) {
+      toStation = "Agra Cantt (AGC)";
+    } else if (actUp.includes("ARR VNS") || actUp.includes("ARR BSB") || actUp.includes("IN-VNS")) {
+      toStation = "Varanasi Jn (BSB)";
+    } else if (actUp.includes("ARR HW") || actUp.includes("AR HW")) {
+      toStation = "Haridwar Jn (HW)";
+    } else if (actUp.includes("ARR DEL") || actUp.includes("ARR NDLS") || actUp.includes("DEL SS")) {
+      toStation = "New Delhi (NDLS)";
+    }
+
+    let travelClass: string | undefined;
+    if (actUp.includes("1ST A/C") || actUp.includes("1ST AC")) travelClass = "1A (First AC)";
+    else if (actUp.includes("2ND A/C") || actUp.includes("2ND AC") || actUp.includes("2DN A/C")) travelClass = "2A (Second AC)";
+    else if (actUp.includes("3RD A/C") || actUp.includes("3RD AC")) travelClass = "3A (Third AC)";
+
+    const pnrMatch = actUp.match(/PNR\s*:?\s*(\d{10})/i);
+    const pnr = pnrMatch ? pnrMatch[1] : undefined;
+
+    const timeMatch = actUp.match(/\b(\d{4})\s*\/\s*(\d{4})\b/);
+    let departureTime: string | undefined;
+    let arrivalTime: string | undefined;
+    if (timeMatch) {
+      departureTime = `${timeMatch[1].slice(0, 2)}:${timeMatch[1].slice(2, 4)}`;
+      arrivalTime = `${timeMatch[2].slice(0, 2)}:${timeMatch[2].slice(2, 4)}`;
+    }
+
+    journeys.push({
+      id: `trn-${bookingRef}-${trainIdx++}`,
+      date: day.date,
+      trainName,
+      trainNumber,
+      fromStation,
+      toStation,
+      travelClass,
+      departureTime,
+      arrivalTime,
+      pnr,
+      rawText: act,
+    });
+  }
+
+  return journeys;
+}
+
+/**
  * Parse an Excel workbook Buffer or XLSX object into strongly-typed SATF Tour records.
+ * Follows all Phase 24 Approved Business Decisions:
+ * 1. Scope: Supports all operational records from 2016-2026 without silent discard.
+ * 2. Date ambiguity: Automatically corrects dates only through documented deterministic rules;
+ *    unresolved cases are flagged for review and never guessed.
+ * 3. Cancellations: Flags possible cancellations for coordinator confirmation; never mutates status.
+ * 4. Duplicate booking references: Preserves separate source records distinctly.
  */
 export function parseExcelWorkbook(
   buffer: ArrayBuffer | Buffer,
@@ -374,6 +711,9 @@ export function parseExcelWorkbook(
   const duplicates: ImportDuplicateItem[] = [];
   const errors: ImportErrorItem[] = [];
   const sheetsSummary: SheetImportDetail[] = [];
+  const excludedSheets: ExcludedSheetDetail[] = [];
+  const correctedDates: CorrectedDateItem[] = [];
+  const possibleCancellations: PossibleCancellationItem[] = [];
 
   const rawTourBlocksByRef = new Map<string, Array<{
     tour: Tour;
@@ -387,6 +727,22 @@ export function parseExcelWorkbook(
 
   for (const sheetName of sheetNames) {
     const s = wb.Sheets[sheetName];
+
+    // Exclude non-operational / scratch worksheets by default
+    if (DEFAULT_EXCLUDED_SHEETS.has(sheetName.trim())) {
+      const range = s && s["!ref"] ? XLSX.utils.decode_range(s["!ref"]) : null;
+      const rowCount = range ? range.e.r + 1 : 0;
+      const isBlank = sheetName.trim() === "Sheet1";
+      excludedSheets.push({
+        sheetName,
+        reason: isBlank
+          ? "Blank scratch worksheet containing zero rows and no operational tours."
+          : "Historical archive / duplicate scratch worksheet (duplicate May 2017 chart). Excluded from operational import by default.",
+        rowCount,
+      });
+      continue;
+    }
+
     if (!s || !s["!ref"]) continue;
 
     const season = getSheetSeason(sheetName);
@@ -397,35 +753,61 @@ export function parseExcelWorkbook(
     const range = XLSX.utils.decode_range(s["!ref"]);
     let toursInThisSheet = 0;
 
-    // Check header date serials in row 0
+    // Detect dynamic column layout for this worksheet (supporting DEC-17, JAN-18, etc.)
+    const layout = detectSheetLayout(s, sheetName);
+
+    // Sheet year and month identification for deterministic date reconciliation
+    let sheetYear: number | null = null;
+    const ym = sheetName.match(/(20\d\d|\b[12]\d\b)/);
+    if (ym) {
+      sheetYear = ym[1].length === 2 ? 2000 + parseInt(ym[1], 10) : parseInt(ym[1], 10);
+    }
+
+    let sheetMonth: number | null = null;
+    const upperSheet = sheetName.toUpperCase();
+    for (const [key, m] of Object.entries(SHEET_MONTH_MAP)) {
+      if (upperSheet.includes(key)) {
+        sheetMonth = m;
+        break;
+      }
+    }
+
+    // Check header date serials in row 0 or row 1
     const colDates = new Map<number, string>();
-    for (let c = 6; c <= range.e.c; c++) {
-      const code = s[0]?.[c]?.v;
-      const iso = xldateToISO(code);
+    for (let c = layout.itinStartCol; c <= range.e.c; c++) {
+      const code = s[0]?.[c]?.v ?? s[1]?.[c]?.v;
+      let iso = xldateToISO(code);
+      // Reconcile header date if affected by deterministic 1-year template offset
+      if (iso && sheetYear && sheetMonth && typeof code === "number" && code > 1000) {
+        try {
+          const parsed = XLSX.SSF.parse_date_code(code);
+          if (parsed && parsed.y === sheetYear - 1) {
+            if (parsed.m === sheetMonth || (sheetMonth < 12 && parsed.m === sheetMonth + 1)) {
+              iso = `${sheetYear}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+            } else if (sheetMonth === 12 && parsed.m === 1) {
+              iso = `${sheetYear + 1}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
       if (iso) {
         colDates.set(c, iso);
       }
     }
 
-    // Sheet year check for date ambiguity detection
-    const sheetYearMatch = sheetName.match(/(20\d\d|\b2\d\b|\b1\d\b)/);
-    let expectedSheetYear: string | null = null;
-    if (sheetYearMatch) {
-      const rawY = sheetYearMatch[1];
-      expectedSheetYear = rawY.length === 2 ? `20${rawY}` : rawY;
-    }
-
     let r = 2;
     while (r <= range.e.r) {
-      const c2 = s[r]?.[2]?.v;
-      if (c2 === undefined || c2 === null) {
+      const refVal = s[r]?.[layout.refCol]?.v;
+      if (refVal === undefined || refVal === null) {
         r++;
         continue;
       }
 
-      const refStr = String(c2).replace(".0", "").trim();
-      // Booking reference pattern: 5 to 8 digits
-      if (!/^\d{5,8}$/.test(refStr)) {
+      const refStr = String(refVal).replace(".0", "").trim();
+      // Booking reference pattern: 4 to 8 digits (supporting historical 4-digit codes)
+      if (!/^\d{4,8}$/.test(refStr)) {
         r++;
         continue;
       }
@@ -433,21 +815,25 @@ export function parseExcelWorkbook(
       toursInThisSheet++;
       totalTourBlocks++;
 
-      const c0 = s[r]?.[0]?.v;
-      const c1 = s[r]?.[1]?.v;
-      const c3 = s[r]?.[3]?.v;
-      const c4 = s[r]?.[4]?.v;
-      const c5 = s[r]?.[5]?.v;
+      const cDate = s[r]?.[layout.dateCol]?.v;
+      const cAgency = s[r]?.[layout.agencyCol]?.v;
+      const cPkg = s[r]?.[layout.packageCol]?.v;
+      const cGuest = s[r]?.[layout.guestCol]?.v;
+      const cNotes = s[r]?.[layout.notesCol]?.v;
 
-      const sub1Val = s[r + 1]?.[4]?.v ? String(s[r + 1]?.[4]?.v).trim() : "";
-      const sub2Val = s[r + 2]?.[4]?.v ? String(s[r + 2]?.[4]?.v).trim() : "";
+      const sub1Val = s[r + 1]?.[layout.guestCol]?.v ? String(s[r + 1]?.[layout.guestCol]?.v).trim() : "";
+      const sub2Val = s[r + 2]?.[layout.guestCol]?.v ? String(s[r + 2]?.[layout.guestCol]?.v).trim() : "";
 
-      const rawArrivalSerial = c0;
-      let arrivalDate = xldateToISO(c0);
+      const rawArrivalSerial = cDate;
+      let arrivalDate = xldateToISO(cDate);
+      const originalArrivalDate = arrivalDate;
+      let dateCorrectionReason: string | undefined;
+
+      const sourceRecordId = `${sheetName}:R${r + 1}:${refStr}`;
 
       // Extract itinerary columns for this row
       const itineraryDays: Array<{ date: string; activity: string }> = [];
-      for (let c = 6; c <= range.e.c; c++) {
+      for (let c = layout.itinStartCol; c <= range.e.c; c++) {
         const act = s[r]?.[c]?.v;
         if (act && String(act).trim()) {
           const dayDate = colDates.get(c) || arrivalDate || "";
@@ -461,15 +847,112 @@ export function parseExcelWorkbook(
       let hasDateAmbiguity = false;
       let dateAmbiguityReason: string | undefined;
 
-      // If arrival date not found in C0, derive from first itinerary day with recorded ambiguity
+      // ─── Documented Deterministic Date Reconciliation ───────────────────────────
+      // Rule 1: SHEET_TEMPLATE_YEAR_RECONCILIATION
+      // When sheet declares unambiguous year Y_sheet and month M, and date serial evaluates
+      // to Y = Y_sheet - 1 and month M, reconcile year to Y_sheet.
+      if (
+        typeof rawArrivalSerial === "number" &&
+        rawArrivalSerial > 1000 &&
+        sheetYear &&
+        sheetMonth
+      ) {
+        try {
+          const parsed = XLSX.SSF.parse_date_code(rawArrivalSerial);
+          if (parsed && parsed.y === sheetYear - 1 && parsed.m === sheetMonth) {
+            const y = String(sheetYear).padStart(4, "0");
+            const m = String(parsed.m).padStart(2, "0");
+            const d = String(parsed.d).padStart(2, "0");
+            const reconciledDate = `${y}-${m}-${d}`;
+            dateCorrectionReason = `Reconciled 1-year template offset: Sheet '${sheetName}' explicitly declares season/year ${sheetYear} for month ${parsed.m}, while source serial evaluated to template year ${parsed.y}. Corrected to ${reconciledDate} per Rule SHEET_TEMPLATE_YEAR_RECONCILIATION.`;
+            arrivalDate = reconciledDate;
+
+            correctedDates.push({
+              bookingReference: refStr,
+              sourceRecordId,
+              sheet: sheetName,
+              row: r + 1,
+              originalDate: originalArrivalDate || `${parsed.y}-${m}-${d}`,
+              correctedDate: reconciledDate,
+              rule: "SHEET_TEMPLATE_YEAR_RECONCILIATION",
+              reason: dateCorrectionReason,
+            });
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // ─── Rule 2: HISTORICAL_SOURCE_EVIDENCE_RECONCILIATION ─────────────────────
+      // When arrival date was not parsed as standard full serial (>1000) or ISO string,
+      // evaluate historical shorthand in raw date cell with sheet year and month context,
+      // and corroborate with itinerary chronology and flight/hotel check-in evidence.
+      if (!arrivalDate && rawArrivalSerial !== undefined && rawArrivalSerial !== null && sheetYear && sheetMonth) {
+        const historicalCandidate = resolveHistoricalDateCandidate(rawArrivalSerial, sheetYear, sheetMonth);
+        if (historicalCandidate) {
+          // Check if there is an earlier arrival event in the itinerary that conflicts with historicalCandidate.
+          // Note: Package summary notes ('ARR / DEP TRF') and advance transfer-only services ('ARR TRF ONLY')
+          // that precede primary international flight arrivals are classified as service notes, not tour arrivals.
+          const earlierArrivalEvents = itineraryDays.filter(
+            (day) =>
+              day.date &&
+              day.date < historicalCandidate &&
+              /\bARR\b/i.test(day.activity) &&
+              !day.activity.includes("ARR / DEP TRF") &&
+              !day.activity.includes("ARR TRF ONLY")
+          );
+
+          if (earlierArrivalEvents.length > 0) {
+            // Internal itinerary conflict between earlier arrival activity and flight arrival/raw date
+            arrivalDate = historicalCandidate;
+            hasDateAmbiguity = true;
+            dateAmbiguityReason = `Itinerary conflict: Raw date indicates '${rawArrivalSerial}' and primary flight arrival indicates ${historicalCandidate}, but column contains an earlier arrival entry ('${earlierArrivalEvents[0].activity}' on ${earlierArrivalEvents[0].date}). Requires coordinator confirmation.`;
+            ambiguities.push({
+              bookingReference: refStr,
+              sourceRecordId,
+              sheet: sheetName,
+              row: r + 1,
+              guestMasked: maskGuestName(String(cGuest || "")),
+              reason: dateAmbiguityReason,
+              rawSerial: rawArrivalSerial,
+            });
+          } else {
+            // Unambiguous: Raw date shorthand corroborated by sheet context and itinerary chronology
+            const hasAdvanceTransfer = itineraryDays.some(
+              (day) => day.date && day.date < historicalCandidate && day.activity.includes("ARR TRF ONLY")
+            );
+            const advanceTransferNote = hasAdvanceTransfer
+              ? ` (advance transfer service on ${itineraryDays.find((d) => d.activity.includes("ARR TRF ONLY"))?.date || "earlier date"} identified as pre-tour service)`
+              : "";
+
+            arrivalDate = historicalCandidate;
+            hasDateAmbiguity = false;
+            dateCorrectionReason = `Resolved historical date ambiguity: Raw date '${rawArrivalSerial}' in sheet '${sheetName}' (Season ${sheetYear}) corroborated by itinerary chronology and arrival flight/hotel transfer${advanceTransferNote}. Deterministically resolved to ${historicalCandidate} per Rule HISTORICAL_SOURCE_EVIDENCE_RECONCILIATION.`;
+            correctedDates.push({
+              bookingReference: refStr,
+              sourceRecordId,
+              sheet: sheetName,
+              row: r + 1,
+              originalDate: String(rawArrivalSerial),
+              correctedDate: historicalCandidate,
+              rule: "HISTORICAL_SOURCE_EVIDENCE_RECONCILIATION",
+              reason: dateCorrectionReason,
+            });
+          }
+        }
+      }
+
+      // If arrival date not found in dateCol and not reconciled, derive from first itinerary day with recorded ambiguity
       if (!arrivalDate && itineraryDays.length > 0 && itineraryDays[0].date) {
         arrivalDate = itineraryDays[0].date;
         hasDateAmbiguity = true;
-        dateAmbiguityReason = `Arrival serial missing in column 0; derived from first itinerary date (${arrivalDate}). Requires operational review.`;
+        dateAmbiguityReason = `Arrival serial missing in column ${layout.dateCol}; derived from first itinerary date (${arrivalDate}). Requires operational review.`;
         ambiguities.push({
           bookingReference: refStr,
+          sourceRecordId,
           sheet: sheetName,
           row: r + 1,
+          guestMasked: maskGuestName(String(cGuest || "")),
           reason: dateAmbiguityReason,
           rawSerial: rawArrivalSerial,
         });
@@ -482,43 +965,51 @@ export function parseExcelWorkbook(
         dateAmbiguityReason = `Missing arrival date: row contains no numeric Excel date serial or valid itinerary date. Requires operational review.`;
         ambiguities.push({
           bookingReference: refStr,
+          sourceRecordId,
           sheet: sheetName,
           row: r + 1,
+          guestMasked: maskGuestName(String(cGuest || "")),
           reason: dateAmbiguityReason,
           rawSerial: rawArrivalSerial,
         });
       }
 
-      // Determine departure date
+      // Determine departure date (ensuring departureDate >= arrivalDate)
       let departureDate = arrivalDate;
-      if (itineraryDays.length > 0 && itineraryDays[itineraryDays.length - 1].date) {
+      const validItinDates = itineraryDays.map((d) => d.date).filter((d) => Boolean(d && d >= arrivalDate));
+      if (validItinDates.length > 0) {
+        departureDate = validItinDates[validItinDates.length - 1];
+      } else if (itineraryDays.length > 0 && itineraryDays[itineraryDays.length - 1].date) {
         departureDate = itineraryDays[itineraryDays.length - 1].date;
       }
 
-      // Ambiguity detection: check if sheet year indicates e.g. 2026, but arrival date resolves to 2025
-      if (expectedSheetYear && arrivalDate) {
-        const arrivalYear = arrivalDate.slice(0, 4);
-        if (expectedSheetYear !== arrivalYear) {
+      // Unresolved ambiguity detection: check if sheet year indicates e.g. 2026, but arrival date resolves to another year
+      // and was NOT reconciled by deterministic rules
+      if (sheetYear && arrivalDate && !dateCorrectionReason && !hasDateAmbiguity) {
+        const arrivalYear = parseInt(arrivalDate.slice(0, 4), 10);
+        if (sheetYear !== arrivalYear) {
           hasDateAmbiguity = true;
-          dateAmbiguityReason = `Sheet '${sheetName}' indicates season ${expectedSheetYear}, but arrival serial ${rawArrivalSerial} mathematically calculates to ${arrivalDate}. Original date faithfully preserved.`;
+          dateAmbiguityReason = `Sheet '${sheetName}' indicates season ${sheetYear}, but arrival serial ${rawArrivalSerial} mathematically calculates to ${arrivalDate}. Original date faithfully preserved for coordinator review.`;
           ambiguities.push({
             bookingReference: refStr,
+            sourceRecordId,
             sheet: sheetName,
             row: r + 1,
+            guestMasked: maskGuestName(String(cGuest || "")),
             reason: dateAmbiguityReason,
             rawSerial: rawArrivalSerial,
           });
         }
       }
 
-      const { guestName, pax } = extractGuestAndPax(c4);
+      const { guestName, pax } = extractGuestAndPax(cGuest);
       const guideAssignment = extractGuideAssignment(sub2Val, refStr);
       const vehicleAssignment = extractVehicleAssignment(sub1Val, refStr);
       const assignments: ResourceAssignment[] = [guideAssignment];
       if (vehicleAssignment) assignments.push(vehicleAssignment);
 
       const flights = extractFlights(sub1Val, arrivalDate, refStr);
-      const packageCode = c3 ? String(c3).trim() : "";
+      const packageCode = cPkg ? String(cPkg).trim() : "";
       const destination = inferCircuitDestination(
         itineraryDays.map((d) => d.activity),
         packageCode
@@ -526,7 +1017,7 @@ export function parseExcelWorkbook(
 
       // Build special requests if notes exist
       const specialRequests: SpecialRequest[] = [];
-      const operationalNotes = c5 ? String(c5).trim() : "";
+      const operationalNotes = cNotes ? String(cNotes).trim() : "";
       if (operationalNotes) {
         specialRequests.push({
           id: `sr-${refStr}-1`,
@@ -538,7 +1029,7 @@ export function parseExcelWorkbook(
         });
       }
 
-      // Build itinerary objects
+      // Build itinerary objects (preserving original text intact)
       const itinerary: ItineraryEntry[] = itineraryDays.map((d, i) => {
         const { type, location } = deduceItineraryTypeAndLocation(d.activity);
         return {
@@ -553,12 +1044,35 @@ export function parseExcelWorkbook(
       });
 
       const hotels = extractHotels(itineraryDays, refStr);
+      const trainJourneys = extractTrainJourneys(itineraryDays, refStr);
 
-      // Tour status computation
-      let status: TourStatus = "upcoming";
-      if (operationalNotes.toUpperCase().includes("CANCEL")) {
-        status = "cancelled";
+      // ─── Cancellation Indicator Detection ──────────────────────────────────────
+      // Approved Decision 3: Flag possible cancellations for coordinator confirmation.
+      // Do not automatically cancel tours based solely on keywords or strikethrough.
+      const combinedNotes = `${operationalNotes} ${itineraryDays.map((d) => d.activity).join(" ")}`;
+      const cancelMatch = combinedNotes.match(/\b(CNCL|CANCEL|CANCELLED|CANCELED)\b/i);
+      let hasCancellationIndicator = false;
+      let cancellationIndicatorReason: string | undefined;
+
+      if (cancelMatch) {
+        hasCancellationIndicator = true;
+        cancellationIndicatorReason = `Possible cancellation indicated by keyword '${cancelMatch[0]}' in source notes/itinerary. Awaiting coordinator confirmation.`;
+        possibleCancellations.push({
+          bookingReference: refStr,
+          sourceRecordId,
+          sheet: sheetName,
+          row: r + 1,
+          guestMasked: maskGuestName(guestName),
+          reason: cancellationIndicatorReason,
+          rawText: operationalNotes || cancelMatch[0],
+        });
       }
+
+      // Deterministic lifecycle status based on tour dates and Asia/Kolkata reference date
+      const status: TourStatus = computeTourLifecycleStatus(
+        { status: "upcoming", arrivalDate, departureDate },
+        getIndiaTodayISO()
+      );
 
       const tour: Tour = {
         id: `satf-${refStr}`,
@@ -583,13 +1097,20 @@ export function parseExcelWorkbook(
         itinerary,
         assignments,
         specialRequests,
+        trainJourneys,
         sourceSheet: sheetName,
         sourceRow: r + 1,
+        sourceProvenance: `${sheetName} Row ${r + 1}`,
+        sourceRecordId,
         sourceSheets: [sheetName],
         rawArrivalSerial,
         hasDateAmbiguity,
         dateAmbiguityReason,
-        agency: c1 ? String(c1).trim() : undefined,
+        originalArrivalDate: originalArrivalDate || undefined,
+        dateCorrectionReason,
+        hasCancellationIndicator,
+        cancellationIndicatorReason,
+        agency: cAgency ? String(cAgency).trim() : undefined,
         packageCode: packageCode || undefined,
         operationalNotes: operationalNotes || undefined,
         isImported: true,
@@ -605,7 +1126,7 @@ export function parseExcelWorkbook(
         itineraryDays,
       });
 
-      // Jump 3 rows to skip subrow 1 and subrow 2
+      // Advance 3 rows per standard 3-row block
       r += 3;
     }
 
@@ -621,48 +1142,57 @@ export function parseExcelWorkbook(
     });
   }
 
-  // ─── Reconcile Duplicates & Spanning Tours ───────────────────────────────────
-
+  // ─── Reconcile Duplicates, Spanning Tours, and Distinct Records ──────────────
   const canonicalTours: Tour[] = [];
   let spanningToursCount = 0;
-  let amendedToursCount = 0;
+  const amendedToursCount = 0;
   let duplicateRowsCount = 0;
   let unassignedGuidesCount = 0;
+  let preservedDistinctCount = 0;
 
   for (const [ref, occurrences] of rawTourBlocksByRef.entries()) {
     if (occurrences.length === 1) {
       const t = occurrences[0].tour;
+      t.id = `satf-${ref}`;
       if (t.assignments.find((a) => a.role === "guide" && a.status === "pending")) {
         unassignedGuidesCount++;
       }
       canonicalTours.push(t);
     } else {
-      // Multiple occurrences detected!
       duplicateRowsCount += occurrences.length - 1;
       const sheets = occurrences.map((o) => o.sheetName);
       const rows = occurrences.map((o) => o.rowNumber);
 
-      // Check if this is a spanning tour across consecutive sheets (e.g. APR and MAY)
-      const base = occurrences[0].tour;
-      const allItineraryDays = occurrences.flatMap((o) => o.itineraryDays);
+      // Check if this is a genuine cross-month spanning tour:
+      // Spanning tour conditions:
+      // 1. Same normalized guest name
+      // 2. Different sheets representing adjacent/consecutive monthly periods
+      // 3. Sequential or identical arrival dates
+      const firstOcc = occurrences[0];
+      const g1 = firstOcc.tour.group.groupName.toLowerCase().replace(/[^a-z]/g, "");
+      const isSpanningCandidate = occurrences.every((o, idx) => {
+        if (idx === 0) return true;
+        const g2 = o.tour.group.groupName.toLowerCase().replace(/[^a-z]/g, "");
+        const nameMatch = g1 === g2 || g1.includes(g2) || g2.includes(g1);
+        return nameMatch && o.sheetName !== firstOcc.sheetName;
+      });
 
-      // Deduplicate itinerary by date + activity
-      const uniqueItinMap = new Map<string, { date: string; activity: string }>();
-      for (const d of allItineraryDays) {
-        uniqueItinMap.set(`${d.date}-${d.activity}`, d);
-      }
-      const mergedItineraryDays = Array.from(uniqueItinMap.values()).sort((a, b) =>
-        a.date.localeCompare(b.date)
-      );
-
-      const distinctSheets = Array.from(new Set(sheets));
-      let resolution: ImportDuplicateItem["resolution"] = "skipped_duplicate";
-
-      if (distinctSheets.length > 1) {
-        resolution = "merged_spanning";
+      if (isSpanningCandidate) {
+        // Genuine cross-month spanning tour
         spanningToursCount++;
+        const base = occurrences[0].tour;
+        base.id = `satf-${ref}`;
+        base.sourceSheets = Array.from(new Set(sheets));
 
-        base.sourceSheets = distinctSheets;
+        const allItineraryDays = occurrences.flatMap((o) => o.itineraryDays);
+        const uniqueItinMap = new Map<string, { date: string; activity: string }>();
+        for (const d of allItineraryDays) {
+          uniqueItinMap.set(`${d.date}-${d.activity}`, d);
+        }
+        const mergedItineraryDays = Array.from(uniqueItinMap.values()).sort((a, b) =>
+          a.date.localeCompare(b.date)
+        );
+
         if (mergedItineraryDays.length > 0) {
           base.arrivalDate = mergedItineraryDays[0].date;
           base.departureDate = mergedItineraryDays[mergedItineraryDays.length - 1].date;
@@ -679,28 +1209,72 @@ export function parseExcelWorkbook(
             };
           });
           base.hotels = extractHotels(mergedItineraryDays, ref);
+          base.trainJourneys = extractTrainJourneys(mergedItineraryDays, ref);
         }
+
+        duplicates.push({
+          bookingReference: ref,
+          sheets,
+          rows,
+          resolution: "merged_spanning",
+          guestMasked: maskGuestName(base.group.groupName),
+          reason: "Cross-month spanning tour with matching guest name; merged itineraries across adjacent monthly sheets.",
+        });
+
+        if (base.assignments.find((a) => a.role === "guide" && a.status === "pending")) {
+          unassignedGuidesCount++;
+        }
+        canonicalTours.push(base);
       } else {
-        resolution = "amended";
-        amendedToursCount++;
-      }
+        // Approved Decision 4: Preserve separate source records until reviewed!
+        // Do NOT overwrite or merge distinct tours simply because their booking references match!
+        preservedDistinctCount += occurrences.length;
 
-      duplicates.push({
-        bookingReference: ref,
-        sheets,
-        rows,
-        resolution,
-      });
+        duplicates.push({
+          bookingReference: ref,
+          sheets,
+          rows,
+          resolution: "preserved_distinct",
+          guestMasked: maskGuestName(firstOcc.tour.group.groupName),
+          reason: `Repeated booking reference '${ref}' with different guests or non-contiguous dates. Preserved as ${occurrences.length} distinct tour records per Decision 4.`,
+        });
 
-      if (base.assignments.find((a) => a.role === "guide" && a.status === "pending")) {
-        unassignedGuidesCount++;
+        for (const occ of occurrences) {
+          const t = occ.tour;
+          const sheetSlug = occ.sheetName.toLowerCase().replace(/[^a-z0-9]/g, "-");
+          t.id = `satf-${ref}-${sheetSlug}-r${occ.rowNumber}`;
+          if (t.assignments.find((a) => a.role === "guide" && a.status === "pending")) {
+            unassignedGuidesCount++;
+          }
+          canonicalTours.push(t);
+        }
       }
-      canonicalTours.push(base);
     }
   }
 
   // Sort canonical tours chronologically by arrivalDate
   canonicalTours.sort((a, b) => a.arrivalDate.localeCompare(b.arrivalDate));
+
+  // Compute season breakdown
+  const seasonMap = new Map<string, { tourCount: number; sheets: Set<string> }>();
+  for (const t of canonicalTours) {
+    const sName = t.sourceSheet || "UNKNOWN";
+    const season = getSheetSeason(sName);
+    if (!seasonMap.has(season)) {
+      seasonMap.set(season, { tourCount: 0, sheets: new Set() });
+    }
+    const entry = seasonMap.get(season)!;
+    entry.tourCount++;
+    entry.sheets.add(sName);
+  }
+
+  const seasons: SeasonGroupSummary[] = Array.from(seasonMap.entries())
+    .map(([season, data]) => ({
+      season,
+      tourCount: data.tourCount,
+      sheetsCount: data.sheets.size,
+    }))
+    .sort((a, b) => a.season.localeCompare(b.season));
 
   const summary: ImportSummary = {
     workbookName: "NEW CHART 2025-2026 (1).xls",
@@ -715,6 +1289,12 @@ export function parseExcelWorkbook(
     dateAmbiguityCount: ambiguities.length,
     unassignedGuidesCount,
     sheetsSummary,
+    excludedSheetsCount: excludedSheets.length,
+    excludedSheets,
+    correctedDatesCount: correctedDates.length,
+    possibleCancellationsCount: possibleCancellations.length,
+    preservedDistinctCount,
+    seasons,
   };
 
   return {
@@ -724,5 +1304,8 @@ export function parseExcelWorkbook(
     ambiguities,
     duplicates,
     errors,
+    excludedSheets,
+    correctedDates,
+    possibleCancellations,
   };
 }

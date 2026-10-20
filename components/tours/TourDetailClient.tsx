@@ -46,6 +46,7 @@ import {
   cancelOperationalTour,
 } from "@/lib/operations-client";
 import { EditTourModal } from "./EditTourModal";
+import { useLanguage } from "@/lib/i18n";
 
 interface TourDetailClientProps {
   initialTour: Tour | null;
@@ -53,6 +54,7 @@ interface TourDetailClientProps {
 }
 
 export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps) {
+  const { t, language } = useLanguage();
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -151,16 +153,24 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
       <PageContainer>
         <div className="bg-white border border-slate-200 rounded-lg p-8 text-center max-w-md mx-auto my-12 shadow-xs">
           <AlertCircle size={36} className="text-amber-500 mx-auto mb-3" />
-          <h2 className="text-base font-bold text-slate-900">Tour Record Not Found</h2>
+          <h2 className="text-base font-bold text-slate-900">{t("detail.not_found")}</h2>
           <p className="text-xs text-slate-500 mt-1 mb-4">
-            No tour matching identifier <span className="font-mono font-semibold">{effectiveId || "unknown"}</span> exists in baseline mock records or your current browser session.
+            {language === "ja" ? (
+              <>
+                識別子 <span className="font-mono font-semibold">{effectiveId || "unknown"}</span> に該当するツアー記録はベースライン台帳およびブラウザセッションに存在しません。
+              </>
+            ) : (
+              <>
+                No tour matching identifier <span className="font-mono font-semibold">{effectiveId || "unknown"}</span> exists in baseline mock records or your current browser session.
+              </>
+            )}
           </p>
           <Link
             href="/tours"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-xs transition-colors"
           >
             <ArrowLeft size={13} />
-            Back to Tours Roster
+            {t("detail.back_to_roster")}
           </Link>
         </div>
       </PageContainer>
@@ -179,19 +189,19 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <Link
             href="/tours"
-            className="inline-flex items-center gap-1 font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-200 px-2.5 py-1 rounded-md shadow-xs transition-colors"
+            className="inline-flex items-center gap-1 font-medium text-slate-600 hover:text-slate-900 bg-white border border-slate-200/90 px-2.5 py-1 rounded-lg shadow-2xs hover:shadow-xs transition-all btn-press"
           >
             <ArrowLeft size={13} />
-            <span>Tours Roster</span>
+            <span>{t("nav.tours")}</span>
           </Link>
           <span className="text-slate-300">/</span>
-          <span className="font-mono font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+          <span className="font-mono font-semibold text-[#172d43] bg-slate-100/90 px-2 py-0.5 rounded">
             {tour.bookingReference}
           </span>
           {hasSessionModifications && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#244d70] bg-[#dcecf7] px-2 py-0.5 rounded border border-[#b6d6eb]">
               <Info size={11} />
-              Session Modified
+              {t("detail.session_modified")}
             </span>
           )}
         </div>
@@ -201,10 +211,10 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
             <button
               type="button"
               onClick={handleReset}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-md shadow-xs transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-lg shadow-2xs transition-colors btn-press"
             >
               <RotateCcw size={12} />
-              Reset Tour
+              {t("detail.reset_tour")}
             </button>
           )}
 
@@ -218,20 +228,20 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                 setCancelError(null);
                 setIsCancelModalOpen(true);
               }}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-red-700 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md shadow-xs transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-red-700 hover:text-red-800 bg-red-50 hover:bg-red-100/80 border border-red-200/90 rounded-lg shadow-2xs transition-colors btn-press"
             >
               <Ban size={12} />
-              Cancel Tour
+              {t("detail.cancel_tour")}
             </button>
           )}
 
           <button
             type="button"
             onClick={() => setIsEditOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-white bg-[#244d70] hover:bg-[#1b3b57] rounded-lg shadow-2xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#244d70] btn-press"
           >
             <Edit3 size={13} />
-            Update Operations
+            {t("detail.update_ops")}
           </button>
         </div>
       </div>
@@ -240,21 +250,21 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
       {tour.status === "cancelled" && (
         <div
           role="alert"
-          className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-900 flex items-start gap-2.5 shadow-xs"
+          className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-900 flex items-start gap-2.5 shadow-xs"
         >
           <Ban size={18} className="text-red-600 shrink-0 mt-0.5" />
           <div className="space-y-0.5">
             <div className="font-bold flex items-center gap-2 text-red-900">
-              <span>TOUR CANCELLED</span>
+              <span>{t("detail.cancelled_banner")}</span>
               {tour.cancelledAt && (
                 <span className="font-normal font-mono text-[11px] text-red-700">
-                  (Cancelled on {formatDate(tour.cancelledAt)})
+                  ({t("detail.cancelled_on")} {formatDate(tour.cancelledAt)})
                 </span>
               )}
             </div>
             <p className="text-red-800">
-              <span className="font-semibold">Reason: </span>
-              {tour.cancellationReason || "No explicit reason specified."}
+              <span className="font-semibold">{t("detail.cancellation_reason")}: </span>
+              {tour.cancellationReason || (language === "ja" ? "理由の明記なし" : "No explicit reason specified.")}
             </p>
           </div>
         </div>
@@ -266,7 +276,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
         >
           <AlertTriangle size={16} className="text-amber-600 shrink-0" />
           <span>
-            <strong>Storage Warning:</strong> Could not check session modifications ({sessionState.error}). Displaying baseline record.
+            <strong>{language === "ja" ? "ストレージ警告:" : "Storage Warning:"}</strong> {sessionState.error}
           </span>
         </div>
       )}
@@ -294,57 +304,57 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs mb-1">
-                <span className="font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                <span className="font-semibold text-[#244d70] bg-[#dcecf7] px-2 py-0.5 rounded border border-[#b6d6eb]">
                   {tour.destination}
                 </span>
                 <span className="text-slate-300">·</span>
                 <span className="font-medium text-slate-600">
-                  {durationNights} Nights / {durationNights + 1} Days
+                  {durationNights} {t("detail.nights")} / {durationNights + 1} {t("detail.days")}
                 </span>
                 <span className="text-slate-300">·</span>
                 <span className="text-slate-500 font-mono">
-                  Party: {tour.group.nationality} ({tour.group.language})
+                  {language === "ja" ? "国籍・言語" : "Party"}: {tour.group.nationality} ({tour.group.language})
                 </span>
               </div>
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+              <h1 className="text-xl sm:text-2xl font-bold text-[#172d43] tracking-tight">
                 {tour.group.groupName}
               </h1>
               <p className="text-xs text-slate-500 mt-1">
-                Primary Contact: <strong className="text-slate-700">{tour.group.contactPerson || "Not specified"}</strong> · Group Ref: <span className="font-mono">{tour.bookingReference}</span>
+                {t("detail.primary_contact")} <strong className="text-slate-700">{tour.group.contactPerson || (language === "ja" ? "未指定" : "Not specified")}</strong> · {t("detail.group_ref")} <span className="font-mono">{tour.bookingReference}</span>
               </p>
             </div>
 
             {/* Provenance & Workbook Context */}
-            <div className="p-2.5 rounded-md bg-slate-50 border border-slate-200 text-[11px] text-slate-600 lg:max-w-xs shrink-0">
+            <div className="p-2.5 rounded-lg bg-slate-50/80 border border-slate-200/80 text-[11px] text-slate-600 lg:max-w-xs shrink-0">
               <div className="flex items-center gap-1.5 font-semibold text-slate-800 mb-0.5">
                 <FileSpreadsheet size={13} className="text-blue-600" />
-                <span>{tour.isImported ? "Workbook Provenance" : "Format Provenance"}</span>
+                <span>{tour.isImported ? (language === "ja" ? "元帳票出処" : "Workbook Provenance") : (language === "ja" ? "データ形式" : "Format Provenance")}</span>
               </div>
               {tour.isImported ? (
                 <div className="text-[10px] space-y-0.5 leading-tight">
                   <p className="text-slate-700">
-                    Sheet: <strong className="font-mono text-slate-900">{tour.sourceSheet}</strong> · Row: <span className="font-mono">{tour.sourceRow}</span>
+                    {language === "ja" ? "シート" : "Sheet"}: <strong className="font-mono text-slate-900">{tour.sourceSheet}</strong> · {language === "ja" ? "行" : "Row"}: <span className="font-mono">{tour.sourceRow}</span>
                   </p>
                   {tour.agency && (
                     <p className="text-slate-600">
-                      Agency: <strong className="font-mono text-blue-700">{tour.agency}</strong>
+                      {language === "ja" ? "手配会社" : "Agency"}: <strong className="font-mono text-blue-700">{tour.agency}</strong>
                       {tour.packageCode && ` · Pkg: ${tour.packageCode}`}
                     </p>
                   )}
                   {tour.rawArrivalSerial && (
                     <p className="text-slate-500 font-mono">
-                      Arrival Serial: {String(tour.rawArrivalSerial)}
+                      {language === "ja" ? "到着シリアル" : "Arrival Serial"}: {String(tour.rawArrivalSerial)}
                     </p>
                   )}
                   {tour.sourceSheets && tour.sourceSheets.length > 1 && (
                     <p className="text-emerald-700 font-medium">
-                      Spanning Sheets: {tour.sourceSheets.join(", ")}
+                      {language === "ja" ? "参照シート群" : "Spanning Sheets"}: {tour.sourceSheets.join(", ")}
                     </p>
                   )}
                 </div>
               ) : (
                 <p className="text-[10px] text-slate-500 leading-tight">
-                  {tour.sourceProvenance || "Illustrative operational format fixture"}.
+                  {tour.sourceProvenance || (language === "ja" ? "標準運用モックデータ" : "Illustrative operational format fixture")}.
                 </p>
               )}
             </div>
@@ -358,9 +368,11 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
             >
               <AlertTriangle size={15} className="text-amber-600 shrink-0 mt-0.5" />
               <div>
-                <strong className="block font-semibold">Date Ambiguity Flagged (Original Preserved)</strong>
+                <strong className="block font-semibold">
+                  {language === "ja" ? "日付整合性アラート（原本保持）" : "Date Ambiguity Flagged (Original Preserved)"}
+                </strong>
                 <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
-                  {tour.dateAmbiguityReason || "Sheet indicated season year differs from calculated serial date. Preserved faithfully without automated alteration."}
+                  {tour.dateAmbiguityReason || (language === "ja" ? "シート年とシリアル日付に差異が検知されました。元データを改変せず保持しています。" : "Sheet indicated season year differs from calculated serial date. Preserved faithfully without automated alteration.")}
                 </p>
               </div>
             </div>
@@ -370,47 +382,47 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100 text-xs">
             <div className="p-2.5 rounded bg-slate-50/70 border border-slate-100">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Party Size
+                {t("detail.party_size")}
               </span>
               <p className="font-semibold text-slate-800 mt-0.5">
-                {tour.group.adultCount} Adults{tour.group.childCount > 0 ? `, ${tour.group.childCount} Children` : ""}
+                {tour.group.adultCount} {t("detail.adults")}{tour.group.childCount > 0 ? `, ${tour.group.childCount} ${t("detail.children")}` : ""}
               </p>
               <p className="text-[10px] text-slate-500 mt-0.5 font-mono">
-                Total: {tour.group.adultCount + tour.group.childCount} pax
+                {language === "ja" ? "合計" : "Total"}: {tour.group.adultCount + tour.group.childCount} {t("detail.pax")}
               </p>
             </div>
 
             <div className="p-2.5 rounded bg-slate-50/70 border border-slate-100">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Inbound Arrival
+                {t("detail.inbound_arrival")}
               </span>
               <p className="font-semibold text-slate-800 mt-0.5">
                 {formatDateShort(tour.arrivalDate)}
               </p>
               <p className="text-[10px] text-blue-700 mt-0.5 font-mono font-medium truncate">
-                {arrivalFlight?.flightNumber || "Transfer pending"} ({arrivalFlight?.arrivalTime || "ETA --:--"})
+                {arrivalFlight?.flightNumber || (language === "ja" ? "送迎確認中" : "Transfer pending")} ({arrivalFlight?.arrivalTime || "ETA --:--"})
               </p>
             </div>
 
             <div className="p-2.5 rounded bg-slate-50/70 border border-slate-100">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Outbound Departure
+                {t("detail.outbound_departure")}
               </span>
               <p className="font-semibold text-slate-800 mt-0.5">
                 {formatDateShort(tour.departureDate)}
               </p>
               <p className="text-[10px] text-slate-600 mt-0.5 font-mono truncate">
-                {departureFlight?.flightNumber || "Transit"} ({departureFlight?.departureTime || "ETD --:--"})
+                {departureFlight?.flightNumber || (language === "ja" ? "乗り継ぎ" : "Transit")} ({departureFlight?.departureTime || "ETD --:--"})
               </p>
             </div>
 
             <div className="p-2.5 rounded bg-slate-50/70 border border-slate-100">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Assigned Guide
+                {t("detail.assigned_guide")}
               </span>
               <p className="font-semibold text-slate-800 mt-0.5 truncate">
                 {tour.assignments.find((a) => a.role === "guide")?.name || (
-                  <span className="text-amber-700 italic">Unassigned</span>
+                  <span className="text-amber-700 italic">{t("detail.unassigned")}</span>
                 )}
               </p>
               <p className="text-[10px] text-slate-500 mt-0.5 font-mono truncate">
@@ -424,7 +436,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
             <div className="mt-3 p-2.5 bg-blue-50/60 border border-blue-100 rounded-md flex items-start gap-2 text-xs text-blue-900">
               <Info size={15} className="text-blue-600 shrink-0 mt-0.5" />
               <div>
-                <strong className="font-semibold">Dispatch Note: </strong>
+                <strong className="font-semibold">{t("detail.dispatch_note")}: </strong>
                 <span>{tour.operationalNotes}</span>
               </div>
             </div>
@@ -440,11 +452,13 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
               <div className="flex items-center gap-2">
                 <AlertTriangle size={15} className="text-amber-600" />
                 <h3 className="text-xs font-bold uppercase tracking-wider text-amber-950">
-                  Tracked Operational Issues ({openIssues.length} open, {tour.issues.length - openIssues.length} resolved)
+                  {language === "ja"
+                    ? `追跡中の運用課題 (${openIssues.length}件未解決 / ${tour.issues.length - openIssues.length}件解決済)`
+                    : `Tracked Operational Issues (${openIssues.length} open, ${tour.issues.length - openIssues.length} resolved)`}
                 </h3>
               </div>
               <span className="text-[11px] text-amber-800">
-                Issues resolve independently from tour status
+                {language === "ja" ? "課題はツアー全体のステータスと独立して管理されます" : "Issues resolve independently from tour status"}
               </span>
             </div>
           </CardHeader>
@@ -461,13 +475,13 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                     <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
                   )}
                   <div className="min-w-0">
-                    <span className="font-semibold text-slate-800 uppercase text-[10px] tracking-wider text-slate-500 block">
-                      Category: {issue.category}
+                    <span className="font-semibold uppercase text-[10px] tracking-wider text-slate-500 block">
+                      {language === "ja" ? "種別" : "Category"}: {issue.category}
                     </span>
                     <p className="text-slate-800 font-medium mt-0.5">{issue.description}</p>
                     {issue.resolutionNotes && (
                       <p className="text-[11px] text-emerald-800 mt-1 font-medium bg-emerald-50 p-1.5 rounded border border-emerald-100">
-                        Resolution Action: {issue.resolutionNotes}
+                        {language === "ja" ? "解決対応" : "Resolution Action"}: {issue.resolutionNotes}
                       </p>
                     )}
                   </div>
@@ -480,7 +494,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                       : "bg-amber-50 text-amber-700 border-amber-200"
                   }
                 >
-                  {issue.resolved ? "Resolved" : "Open Blocker"}
+                  {issue.resolved ? (language === "ja" ? "解決済" : "Resolved") : (language === "ja" ? "要対応" : "Open Blocker")}
                 </Badge>
               </div>
             ))}
@@ -496,11 +510,11 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
           <Card>
             <CardHeader className="bg-slate-50/50">
               <SectionHeader
-                title="Operational Itinerary"
-                description="Chronological schedule of transfers, sightseeing, and activities"
+                title={t("detail.itinerary")}
+                description={t("detail.itinerary_desc")}
                 badge={
                   <span className="text-[10px] font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
-                    {tour.itinerary.length} Days
+                    {tour.itinerary.length} {t("detail.days")}
                   </span>
                 }
               />
@@ -518,7 +532,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                       <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-slate-900">
-                            Day {idx + 1} — {formatDateShort(item.date)}
+                            {language === "ja" ? `${idx + 1}日目 — ${formatDateShort(item.date)}` : `Day ${idx + 1} — ${formatDateShort(item.date)}`}
                           </span>
                           {item.startTime && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium text-slate-600 bg-white px-1.5 py-0.2 rounded border border-slate-200">
@@ -552,14 +566,14 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                         {item.durationMinutes && (
                           <div className="flex items-center gap-1">
                             <Clock size={12} className="text-slate-400" />
-                            <span>Approx. {Math.round(item.durationMinutes / 60)} hrs</span>
+                            <span>{language === "ja" ? `約 ${Math.round(item.durationMinutes / 60)} 時間` : `Approx. ${Math.round(item.durationMinutes / 60)} hrs`}</span>
                           </div>
                         )}
                       </div>
 
                       {item.notes && (
                         <p className="mt-2 text-[11px] text-amber-800 bg-amber-50 p-2 rounded border border-amber-100">
-                          <strong>Note:</strong> {item.notes}
+                          <strong>{t("detail.note")}:</strong> {item.notes}
                         </p>
                       )}
                     </div>
@@ -573,8 +587,8 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
           <Card>
             <CardHeader className="bg-slate-50/50">
               <SectionHeader
-                title="Flights & Transport Bookings"
-                description="International and regional transit bookings"
+                title={t("detail.flights")}
+                description={t("detail.flights_desc")}
               />
             </CardHeader>
             <CardContent className="p-4 sm:p-5">
@@ -586,7 +600,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
-                        {flight.direction === "arrival" ? "Inbound Arrival" : "Outbound Departure"}
+                        {flight.direction === "arrival" ? t("detail.inbound_arrival") : t("detail.outbound_departure")}
                       </span>
                       <span className="text-xs font-mono font-bold bg-white border border-slate-200 px-2 py-0.5 rounded">
                         {flight.flightNumber}
@@ -599,20 +613,20 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
 
                     <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 pt-1 border-t border-slate-100">
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Date</span>
+                        <span className="text-slate-400 block text-[10px]">{t("detail.col_date")}</span>
                         <span className="font-medium">{formatDate(flight.date)}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Schedule</span>
+                        <span className="text-slate-400 block text-[10px]">{t("detail.col_schedule")}</span>
                         <span className="font-medium font-mono">{flight.departureTime} – {flight.arrivalTime}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px]">Airline</span>
+                        <span className="text-slate-400 block text-[10px]">{t("detail.col_airline")}</span>
                         <span>{flight.airline}</span>
                       </div>
                       {flight.terminal && (
                         <div>
-                          <span className="text-slate-400 block text-[10px]">Terminal</span>
+                          <span className="text-slate-400 block text-[10px]">{t("detail.col_terminal")}</span>
                           <span>{flight.terminal}</span>
                         </div>
                       )}
@@ -631,15 +645,15 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
             <CardHeader className="bg-slate-50/50">
               <div className="flex items-center justify-between w-full">
                 <SectionHeader
-                  title="Resource Allocations"
-                  description="Guide, driver, and vehicle assignments"
+                  title={t("detail.assigned_personnel")}
+                  description={t("detail.assigned_personnel_desc")}
                 />
                 <button
                   type="button"
                   onClick={() => setIsEditOpen(true)}
                   className="text-xs text-blue-600 hover:text-blue-800 font-semibold shrink-0"
                 >
-                  Edit
+                  {language === "ja" ? "編集" : "Edit"}
                 </button>
               </div>
             </CardHeader>
@@ -662,7 +676,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                     </div>
                     <p className="text-xs sm:text-sm font-semibold text-slate-900 mt-0.5 truncate">
                       {assignment.name || (
-                        <span className="text-slate-400 italic font-normal">Unassigned</span>
+                        <span className="text-slate-400 italic font-normal">{t("detail.unassigned")}</span>
                       )}
                     </p>
                     {assignment.reference && (
@@ -696,8 +710,8 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
           <Card>
             <CardHeader className="bg-slate-50/50">
               <SectionHeader
-                title="Hotel Accommodations"
-                description="Lodging arrangements and voucher references"
+                title={t("detail.accommodations")}
+                description={t("detail.accommodations_desc")}
               />
             </CardHeader>
             <CardContent className="p-4 space-y-3">
@@ -715,7 +729,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-600">
-                    {formatDateShort(hotel.checkIn)} – {formatDateShort(hotel.checkOut)} ({nightsBetween(hotel.checkIn, hotel.checkOut)} nights)
+                    {formatDateShort(hotel.checkIn)} – {formatDateShort(hotel.checkOut)} ({nightsBetween(hotel.checkIn, hotel.checkOut)} {t("detail.nights")})
                   </p>
                   <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
                     <span>
@@ -723,11 +737,11 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                     </span>
                     {hotel.confirmationNumber ? (
                       <span className="font-mono text-slate-700 font-medium bg-white px-1.5 py-0.2 rounded border border-slate-200">
-                        Voucher: {hotel.confirmationNumber}
+                        {language === "ja" ? "バウチャー" : "Voucher"}: {hotel.confirmationNumber}
                       </span>
                     ) : (
                       <span className="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">
-                        Voucher Pending
+                        {language === "ja" ? "バウチャー未発行" : "Voucher Pending"}
                       </span>
                     )}
                   </div>
@@ -740,14 +754,14 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
           <Card>
             <CardHeader className="bg-slate-50/50">
               <SectionHeader
-                title="Special Requests & Dietary"
-                description="Guest preferences and accessibility notes"
+                title={t("detail.special_requests")}
+                description={language === "ja" ? "食事制限・アレルギーおよびバリアフリー対応" : "Guest preferences and accessibility notes"}
               />
             </CardHeader>
             <CardContent className="p-4">
               {tour.specialRequests.length === 0 ? (
                 <p className="text-xs text-slate-400 italic text-center py-2">
-                  No special dietary or accessibility requests logged.
+                  {language === "ja" ? "特別な食事や配慮要望は登録されていません。" : "No special dietary or accessibility requests logged."}
                 </p>
               ) : (
                 <ul className="space-y-2.5">
@@ -774,7 +788,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                                 : "bg-amber-100 text-amber-800"
                             }`}
                           >
-                            {req.resolved ? "Resolved" : "Action Pending"}
+                            {req.resolved ? (language === "ja" ? "解決済" : "Resolved") : (language === "ja" ? "対応待ち" : "Action Pending")}
                           </span>
                         </div>
                       </div>
@@ -810,7 +824,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
               <div className="flex items-center gap-2 text-red-700">
                 <Ban size={18} />
                 <h3 id="cancel-modal-title" className="text-sm font-bold text-slate-900">
-                  Cancel Tour Operation
+                  {t("detail.cancel_modal_title")}
                 </h3>
               </div>
               <button
@@ -825,10 +839,18 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
 
             <div className="p-5 space-y-4">
               <p className="text-xs text-slate-600 leading-relaxed">
-                You are about to cancel tour{" "}
-                <strong className="text-slate-900 font-mono">{tour.bookingReference}</strong> (
-                {tour.group.groupName}). This will change its status to{" "}
-                <span className="font-semibold text-red-700">Cancelled</span> across all views.
+                {language === "ja" ? (
+                  <>
+                    ツアー <strong className="text-slate-900 font-mono">{tour.bookingReference}</strong> ({tour.group.groupName}) をキャンセルします。ステータスは全画面で <span className="font-semibold text-red-700">キャンセル済</span> に更新されます。
+                  </>
+                ) : (
+                  <>
+                    You are about to cancel tour{" "}
+                    <strong className="text-slate-900 font-mono">{tour.bookingReference}</strong> (
+                    {tour.group.groupName}). This will change its status to{" "}
+                    <span className="font-semibold text-red-700">Cancelled</span> across all views.
+                  </>
+                )}
               </p>
 
               {cancelError && (
@@ -846,7 +868,7 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                   htmlFor="cancel-reason-input"
                   className="block text-xs font-semibold text-slate-700 mb-1"
                 >
-                  Cancellation Reason <span className="text-red-600">*</span>
+                  {t("detail.cancellation_reason")} <span className="text-red-600">*</span>
                 </label>
                 <textarea
                   id="cancel-reason-input"
@@ -856,12 +878,12 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                     setCancelReason(e.target.value);
                     if (cancelError) setCancelError(null);
                   }}
-                  placeholder="e.g. Guest requested cancellation due to medical emergency / flight schedule disrupted"
+                  placeholder={t("detail.cancel_reason_placeholder")}
                   className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-md focus:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
                   required
                 />
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  Minimum 5 characters. This will be preserved in the session audit trail.
+                  {language === "ja" ? "5文字以上で入力してください。監査ログに記録されます。" : "Minimum 5 characters. This will be preserved in the session audit trail."}
                 </span>
               </div>
             </div>
@@ -872,14 +894,14 @@ export function TourDetailClient({ initialTour, tourId }: TourDetailClientProps)
                 onClick={() => setIsCancelModalOpen(false)}
                 className="px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-white border border-slate-300 rounded-md shadow-xs transition-colors"
               >
-                Keep Active
+                {language === "ja" ? "キャンセルせず戻る" : "Keep Active"}
               </button>
               <button
                 type="button"
                 onClick={handleConfirmCancel}
                 className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md shadow-xs transition-colors"
               >
-                Confirm Cancellation
+                {t("detail.confirm_cancel")}
               </button>
             </div>
           </div>

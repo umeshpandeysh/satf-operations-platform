@@ -15,6 +15,7 @@ import {
   Radio,
   Clock,
   ShieldAlert,
+  FileSpreadsheet,
 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 
@@ -59,6 +60,13 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Operations Reports",
     href: "/reports",
     icon: BarChart3,
+    implemented: true,
+    section: "system",
+  },
+  {
+    label: "Import Review",
+    href: "/import/review",
+    icon: FileSpreadsheet,
     implemented: true,
     section: "system",
   },

@@ -19,11 +19,11 @@ export interface BadgeProps {
 }
 
 const BADGE_VARIANTS: Record<NonNullable<BadgeProps["variant"]>, string> = {
-  neutral: "bg-slate-100 text-slate-700 border-slate-200",
-  success: "bg-emerald-50 text-emerald-800 border-emerald-200",
-  warning: "bg-amber-50 text-amber-800 border-amber-200",
-  danger: "bg-red-50 text-red-800 border-red-200",
-  info: "bg-blue-50 text-blue-800 border-blue-200",
+  neutral: "bg-slate-100/90 text-slate-700 border-slate-200/90",
+  success: "bg-emerald-50 text-emerald-800 border-emerald-200/90",
+  warning: "bg-amber-50 text-amber-800 border-amber-200/90",
+  danger: "bg-red-50 text-red-800 border-red-200/90",
+  info: "bg-[#dcecf7] text-[#244d70] border-[#b6d6eb]",
   outline: "bg-transparent text-slate-700 border-slate-300",
 };
 
@@ -32,14 +32,14 @@ export function Badge({ children, className, variant, dot }: BadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium tracking-tight border",
+        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium tracking-tight border transition-colors",
         variant ? variantClass : "border-transparent",
         className
       )}
     >
       {dot && (
         <span
-          className="w-1.5 h-1.5 rounded-full bg-current opacity-75"
+          className="w-1.5 h-1.5 rounded-full bg-current opacity-85"
           aria-hidden="true"
         />
       )}
@@ -60,7 +60,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold tracking-tight border",
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold tracking-tight border transition-colors",
         TOUR_STATUS_CLASSES[status],
         className
       )}
@@ -69,7 +69,7 @@ export function StatusBadge({
         className={cn(
           "w-1.5 h-1.5 rounded-full",
           status === "active" && "bg-emerald-500 animate-pulse",
-          status === "upcoming" && "bg-blue-500",
+          status === "upcoming" && "bg-[#244d70]",
           status === "attention" && "bg-amber-500",
           status === "completed" && "bg-slate-400",
           status === "cancelled" && "bg-red-500"
@@ -123,13 +123,15 @@ export function AssignmentBadge({
 export interface CardProps {
   children: React.ReactNode;
   className?: string;
+  onClick?: () => void;
 }
 
-export function Card({ children, className }: CardProps) {
+export function Card({ children, className, onClick }: CardProps) {
   return (
     <div
+      onClick={onClick}
       className={cn(
-        "bg-white rounded-lg border border-slate-200/90 shadow-xs transition-shadow",
+        "bg-white rounded-xl border border-slate-200/85 shadow-2xs hover:shadow-xs hover:border-slate-300/90 transition-all duration-200",
         className
       )}
     >
@@ -159,7 +161,7 @@ export function CardFooter({ children, className }: CardProps) {
   return (
     <div
       className={cn(
-        "px-4 py-2.5 sm:px-5 sm:py-3 bg-slate-50/70 border-t border-slate-100 text-xs text-slate-500 rounded-b-lg",
+        "px-4 py-2.5 sm:px-5 sm:py-3 bg-slate-50/60 border-t border-slate-100/90 text-xs text-slate-500 rounded-b-xl",
         className
       )}
     >
@@ -184,21 +186,21 @@ export function MetricCard({
   label,
   value,
   icon: Icon,
-  iconClass = "text-blue-600 bg-blue-50/80 border-blue-100",
+  iconClass = "text-[#244d70] bg-[#dcecf7]/80 border-[#b6d6eb]/80",
   description,
   badge,
   href,
 }: MetricCardProps) {
   const cardContent = (
-    <Card className={cn("transition-all", href && "hover:border-blue-400 hover:shadow-xs cursor-pointer")}>
-      <CardContent className="p-4 sm:p-4.5">
+    <Card className={cn("transition-all duration-200", href && "hover:border-[#244d70]/40 hover:shadow-xs hover:-translate-y-0.5 cursor-pointer")}>
+      <CardContent className="p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold tracking-wider uppercase text-slate-500 truncate">
+            <p className="text-[11px] font-bold tracking-wider uppercase text-slate-500 truncate">
               {label}
             </p>
             <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-2xl font-bold text-slate-900 tracking-tight tabular-nums">
+              <span className="text-2xl sm:text-3xl font-extrabold text-[#172d43] tracking-tight tabular-nums font-mono">
                 {value}
               </span>
               {badge}
@@ -211,12 +213,12 @@ export function MetricCard({
           </div>
           <div
             className={cn(
-              "flex items-center justify-center w-9 h-9 rounded-md border shrink-0",
+              "flex items-center justify-center w-10 h-10 rounded-lg border shrink-0 shadow-2xs transition-colors",
               iconClass
             )}
             aria-hidden="true"
           >
-            <Icon size={18} />
+            <Icon size={19} />
           </div>
         </div>
       </CardContent>
@@ -225,7 +227,7 @@ export function MetricCard({
 
   if (href) {
     return (
-      <Link href={href} className="block group focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-lg">
+      <Link href={href} className="block group focus:outline-none focus-visible:ring-2 focus-visible:ring-[#244d70] rounded-xl">
         {cardContent}
       </Link>
     );
@@ -253,7 +255,7 @@ export function SectionHeader({
     <div className="flex items-start justify-between gap-4 w-full">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-slate-900 tracking-tight">
+          <h2 className="text-sm font-bold text-[#172d43] tracking-tight">
             {title}
           </h2>
           {badge}
@@ -287,7 +289,7 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
       <div
-        className="flex items-center justify-center w-11 h-11 rounded-lg bg-slate-100 border border-slate-200 text-slate-500 mb-3"
+        className="flex items-center justify-center w-11 h-11 rounded-xl bg-[#dcecf7]/50 border border-[#b6d6eb]/70 text-[#244d70] mb-3"
         aria-hidden="true"
       >
         <Icon size={20} />
@@ -313,7 +315,7 @@ export function PageContainer({
   return (
     <div
       className={cn(
-        "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-5",
+        "max-w-[1580px] w-full mx-auto px-3.5 sm:px-6 lg:px-8 xl:px-10 pt-5 sm:pt-7 pb-12 space-y-6 sm:space-y-8",
         className
       )}
     >

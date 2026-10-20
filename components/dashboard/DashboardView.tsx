@@ -28,6 +28,9 @@ import {
   StatusBadge,
 } from "@/components/ui/Primitives";
 import type { Tour } from "@/lib/types";
+import { HeroSection } from "./HeroSection";
+import { QuotesCarousel } from "./QuotesCarousel";
+import { useLanguage } from "@/lib/i18n";
 import {
   computeDashboardMetricsFromTours,
   getAttentionItemsFromTours,
@@ -54,6 +57,7 @@ export interface DashboardViewProps {
 }
 
 export function DashboardView({ initialTours, today }: DashboardViewProps) {
+  const { t, language } = useLanguage();
   const sessionRaw = useSyncExternalStore(
     subscribeSessionStore,
     getSessionSnapshot,
@@ -229,42 +233,54 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
   }
 
   return (
-    <PageContainer>
-      {/* ── Operational Dispatch Ribbon ─────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200/90 rounded-lg px-4 py-2.5 shadow-xs">
+    <PageContainer className="space-y-6">
+      {/* ── 1. Hero Operations Section ────────────────── */}
+      <HeroSection toursCount={tours.length} />
+
+      {/* ── 2. Operational Dispatch Ribbon ─────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200/85 rounded-xl px-4 py-2.5 shadow-2xs">
         <div className="flex items-center gap-2.5 text-xs text-slate-700 min-w-0">
-          <div className="flex items-center gap-1.5 font-semibold text-slate-900 shrink-0">
+          <div className="flex items-center gap-1.5 font-bold text-[#172d43] shrink-0">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Operational Day:</span>
+            <span>{t("dash.operational_day")}</span>
           </div>
-          <span className="font-mono font-medium text-blue-700 bg-blue-50/80 px-2 py-0.5 rounded border border-blue-100 shrink-0">
+          <span className="font-mono font-bold text-[#244d70] bg-[#dcecf7]/80 px-2 py-0.5 rounded border border-[#b6d6eb] shrink-0">
             {formatDate(today)}
           </span>
           <span className="hidden md:inline text-slate-400">·</span>
           <span className="hidden md:inline text-slate-500 truncate">
-            Asia/Kolkata (IST UTC+5:30) · {tours.some((t) => t.isImported) ? "Real Operational Dataset" : "Demo operational records"}
+            Asia/Kolkata (IST UTC+5:30) ·{" "}
+            {tours.length === 0
+              ? (language === "ja" ? "データベース未登録 (0件)" : "Database Empty (0 Active Tours)")
+              : tours.some((t) => t.isImported)
+              ? (language === "ja" ? "本番手配台帳有効" : "Real Operational Dataset")
+              : (language === "ja" ? "デモ用データ" : "Demo operational records")}
           </span>
         </div>
 
         {hasSessionEdits ? (
           <div className="flex items-center gap-2 shrink-0">
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-              <Info size={12} className="text-blue-600" />
-              Active Session Modifications ({Object.keys(sessionTours || {}).length})
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#244d70] bg-[#dcecf7] px-2 py-0.5 rounded border border-[#b6d6eb]">
+              <Info size={12} className="text-[#244d70]" />
+              {t("dash.session_active")} ({Object.keys(sessionTours || {}).length})
             </span>
             <button
               type="button"
               onClick={handleResetSession}
-              className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded border border-slate-300 transition-colors"
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded border border-slate-300 transition-colors btn-press"
             >
-              <RotateCcw size={11} /> Reset Data
+              <RotateCcw size={11} /> {t("dash.reset_session")}
             </button>
           </div>
         ) : (
           <span className="text-[11px] font-mono hidden sm:inline">
-            {tours.some((t) => t.isImported) ? (
+            {tours.length === 0 ? (
+              <span className="text-amber-700 font-bold bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                {language === "ja" ? "手配データベース未登録 (0件)" : "Operational Database Empty (0 Tours)"}
+              </span>
+            ) : tours.some((t) => t.isImported) ? (
               <span className="text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                Operational Dataset Active ({tours.length} Tours)
+                {language === "ja" ? `手配台帳有効 (${tours.length}件)` : `Operational Dataset Active (${tours.length} Tours)`}
               </span>
             ) : (
               <span className="text-slate-400">Baseline Mock Dataset</span>
@@ -272,6 +288,29 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
           </span>
         )}
       </div>
+
+      {tours.length === 0 && (
+        <div className="bg-[#dcecf7]/60 border border-[#b6d6eb] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#172d43] shadow-2xs">
+          <div className="flex items-start gap-3">
+            <Info size={20} className="text-[#244d70] shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-bold text-sm text-[#172d43]">
+                Operational Database Empty (0 Tours Activated)
+              </p>
+              <p className="text-slate-600 leading-relaxed text-[11px]">
+                The live operational database currently contains zero tour records. The staged SATF Excel workbook (1,757 tours) is loaded in preview and ready for coordinator review, date decisions, and dry-run reconciliation.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/import/review"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#244d70] hover:bg-[#1b3b57] text-white font-semibold text-xs shrink-0 transition-colors shadow-2xs btn-press"
+          >
+            Review Staged Workbook
+            <ChevronRight size={14} />
+          </Link>
+        </div>
+      )}
 
       {sessionState.status === "error" && (
         <div
@@ -303,10 +342,10 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
         </h2>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
           <MetricCard
-            label="Arrivals Today"
+            label={t("dash.arriving_today")}
             value={metrics.arrivalsToday}
             icon={PlaneLanding}
-            iconClass="text-blue-700 bg-blue-50/80 border-blue-200"
+            iconClass="text-[#244d70] bg-[#dcecf7]/80 border-[#b6d6eb]/80"
             href="/calendar"
             description={
               todayArrivals.length > 0
@@ -315,10 +354,10 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
             }
           />
           <MetricCard
-            label="Departures Today"
+            label={t("dash.departing_today")}
             value={metrics.departuresToday}
             icon={PlaneTakeoff}
-            iconClass="text-slate-700 bg-slate-100 border-slate-200"
+            iconClass="text-slate-700 bg-slate-100 border-slate-200/90"
             href="/calendar"
             description={
               todayDepartures.length > 0
@@ -327,10 +366,10 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
             }
           />
           <MetricCard
-            label="Active Circuit Tours"
+            label={t("dash.active_operations")}
             value={metrics.activeToday}
             icon={Activity}
-            iconClass="text-emerald-700 bg-emerald-50/80 border-emerald-200"
+            iconClass="text-emerald-700 bg-emerald-50/80 border-emerald-200/90"
             href="/tours"
             description={
               activeMovements.length > 0
@@ -339,12 +378,12 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
             }
           />
           <MetricCard
-            label="Attention Required"
+            label={t("dash.attention_needed")}
             value={metrics.requireAttention}
             icon={AlertTriangle}
             iconClass={
               metrics.requireAttention > 0
-                ? "text-amber-700 bg-amber-50/80 border-amber-200"
+                ? "text-amber-700 bg-amber-50/80 border-amber-200/90"
                 : "text-slate-600 bg-slate-100 border-slate-200"
             }
             href="/tours"
@@ -358,60 +397,60 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
       </section>
 
       {/* ── Tour Status Lifecycle Breakdown ─────────────────────────────────── */}
-      <div className="bg-white border border-slate-200/90 rounded-lg p-3 shadow-xs">
+      <div className="bg-white border border-slate-200/85 rounded-xl p-3.5 shadow-2xs">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-            Tour Operations Lifecycle Breakdown
+            {t("dash.lifecycle_breakdown")}
           </span>
           <Link
             href="/tours"
-            className="text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-0.5"
+            className="text-[11px] font-semibold text-[#244d70] hover:text-[#172d43] hover:underline flex items-center gap-0.5"
           >
-            <span>View All Tours Roster</span>
+            <span>{t("dash.view_all_tours")}</span>
             <ChevronRight size={12} />
           </Link>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
           <Link
             href="/tours"
-            className="flex flex-col p-2 rounded-md bg-slate-50 hover:bg-slate-100 border border-slate-200/80 transition-colors"
+            className="flex flex-col p-2.5 rounded-lg bg-slate-50 hover:bg-slate-100/90 border border-slate-200/80 transition-all btn-press"
           >
-            <span className="text-[10px] text-slate-500 font-medium">Total Roster</span>
-            <span className="text-base font-bold text-slate-900 mt-0.5 font-mono">{statusCounts.all}</span>
+            <span className="text-[10px] text-slate-500 font-medium">{t("dash.total_roster")}</span>
+            <span className="text-base font-bold text-[#172d43] mt-0.5 font-mono">{statusCounts.all}</span>
           </Link>
           <Link
             href="/tours"
-            className="flex flex-col p-2 rounded-md bg-emerald-50/60 hover:bg-emerald-100/60 border border-emerald-200/70 transition-colors"
+            className="flex flex-col p-2.5 rounded-lg bg-emerald-50/60 hover:bg-emerald-100/60 border border-emerald-200/70 transition-all btn-press"
           >
-            <span className="text-[10px] text-emerald-700 font-medium">Active Circuits</span>
+            <span className="text-[10px] text-emerald-700 font-medium">{t("dash.active_circuits")}</span>
             <span className="text-base font-bold text-emerald-800 mt-0.5 font-mono">{statusCounts.active}</span>
           </Link>
           <Link
             href="/tours"
-            className="flex flex-col p-2 rounded-md bg-blue-50/60 hover:bg-blue-100/60 border border-blue-200/70 transition-colors"
+            className="flex flex-col p-2.5 rounded-lg bg-[#dcecf7]/60 hover:bg-[#dcecf7] border border-[#b6d6eb]/70 transition-all btn-press"
           >
-            <span className="text-[10px] text-blue-700 font-medium">Upcoming</span>
-            <span className="text-base font-bold text-blue-800 mt-0.5 font-mono">{statusCounts.upcoming}</span>
+            <span className="text-[10px] text-[#244d70] font-medium">{t("tours.filter_upcoming")}</span>
+            <span className="text-base font-bold text-[#244d70] mt-0.5 font-mono">{statusCounts.upcoming}</span>
           </Link>
           <Link
             href="/tours"
-            className="flex flex-col p-2 rounded-md bg-amber-50/60 hover:bg-amber-100/60 border border-amber-200/70 transition-colors"
+            className="flex flex-col p-2.5 rounded-lg bg-amber-50/60 hover:bg-amber-100/60 border border-amber-200/70 transition-all btn-press"
           >
-            <span className="text-[10px] text-amber-700 font-medium">Needs Attention</span>
+            <span className="text-[10px] text-amber-700 font-medium">{t("tours.filter_attention")}</span>
             <span className="text-base font-bold text-amber-800 mt-0.5 font-mono">{statusCounts.attention}</span>
           </Link>
           <Link
             href="/tours"
-            className="flex flex-col p-2 rounded-md bg-slate-100 hover:bg-slate-200/70 border border-slate-200 transition-colors"
+            className="flex flex-col p-2.5 rounded-lg bg-slate-100 hover:bg-slate-200/70 border border-slate-200 transition-all btn-press"
           >
-            <span className="text-[10px] text-slate-600 font-medium">Completed</span>
+            <span className="text-[10px] text-slate-600 font-medium">{t("tours.filter_completed")}</span>
             <span className="text-base font-bold text-slate-700 mt-0.5 font-mono">{statusCounts.completed}</span>
           </Link>
           <Link
             href="/tours"
-            className="flex flex-col p-2 rounded-md bg-red-50/60 hover:bg-red-100/60 border border-red-200/70 transition-colors"
+            className="flex flex-col p-2.5 rounded-lg bg-red-50/60 hover:bg-red-100/60 border border-red-200/70 transition-all btn-press"
           >
-            <span className="text-[10px] text-red-700 font-medium">Cancelled</span>
+            <span className="text-[10px] text-red-700 font-medium">{t("tours.filter_cancelled")}</span>
             <span className="text-base font-bold text-red-800 mt-0.5 font-mono">{statusCounts.cancelled}</span>
           </Link>
         </div>
@@ -485,7 +524,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                           <div className="flex flex-col items-end gap-1 shrink-0">
                             <Link
                               href={`/tours/${tour.id}`}
-                              className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-800"
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-[#244d70] hover:text-[#172d43] btn-press"
                             >
                               Dispatch <ChevronRight size={13} />
                             </Link>
@@ -523,7 +562,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                 action={
                   <Link
                     href="/tours"
-                    className="text-xs text-blue-600 hover:text-blue-800 font-semibold"
+                    className="text-xs text-[#244d70] hover:text-[#172d43] font-semibold"
                   >
                     View All Tours →
                   </Link>
@@ -544,14 +583,14 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                       <Link
                         key={tour.id}
                         href={`/tours/${tour.id}`}
-                        className="group flex items-center gap-3.5 p-3.5 sm:px-4 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:bg-blue-50"
+                        className="group flex items-center gap-3.5 p-3.5 sm:px-4 hover:bg-slate-50/80 transition-colors focus:outline-none focus-visible:bg-[#dcecf7]/30"
                       >
                         {/* Date badge */}
-                        <div className="w-12 h-12 rounded-md bg-slate-100 border border-slate-200/90 flex flex-col items-center justify-center shrink-0 group-hover:border-blue-300 transition-colors">
+                        <div className="w-12 h-12 rounded-lg bg-slate-100/90 border border-slate-200/90 flex flex-col items-center justify-center shrink-0 group-hover:border-[#244d70]/40 transition-colors shadow-2xs">
                           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                             {formatDateShort(tour.arrivalDate).split(" ")[1]}
                           </span>
-                          <span className="text-sm font-bold text-slate-800 leading-tight">
+                          <span className="text-sm font-bold text-[#172d43] leading-tight">
                             {formatDateShort(tour.arrivalDate).split(" ")[0]}
                           </span>
                         </div>
@@ -559,7 +598,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                         {/* Tour metadata */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs font-semibold text-blue-700">
+                            <span className="font-mono text-xs font-semibold text-[#244d70]">
                               {tour.bookingReference}
                             </span>
                             <span className="text-slate-300">·</span>
@@ -567,7 +606,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                               {tour.destination}
                             </span>
                           </div>
-                          <p className="text-xs font-semibold text-slate-900 mt-0.5 truncate">
+                          <p className="text-xs font-semibold text-[#172d43] mt-0.5 truncate">
                             {tour.group.groupName}
                           </p>
                           <p className="text-[11px] text-slate-500 mt-0.5">
@@ -593,7 +632,9 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
             </CardContent>
             <CardFooter className="flex items-center justify-between">
               <span>Showing next {upcomingArrivals.length} scheduled arrivals</span>
-              <span className="text-slate-400 font-mono">Real-time mock dataset</span>
+              <span className="text-slate-400 font-mono">
+                {tours.some((t) => t.isImported) ? "Authoritative Operational Dataset" : "Baseline Demonstration Dataset"}
+              </span>
             </CardFooter>
           </Card>
         </div>
@@ -643,7 +684,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                           />
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-mono text-xs font-semibold text-slate-900">
+                              <span className="font-mono text-xs font-semibold text-[#172d43]">
                                 {item.bookingReference}
                               </span>
                               <span className="text-[10px] font-medium text-slate-500">
@@ -656,7 +697,7 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                           </div>
                         </div>
 
-                        <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-blue-600 shrink-0">
+                        <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-[#244d70] hover:text-[#172d43] shrink-0">
                           Review <ChevronRight size={12} />
                         </span>
                       </div>
@@ -671,11 +712,11 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
           <Card>
             <CardHeader className="bg-slate-50/50">
               <SectionHeader
-                title="Logistics Allocation Health"
-                description="Pending operational assignments across tours"
+                title={language === "ja" ? "配車・手配進捗ヘルス" : "Logistics Allocation Health"}
+                description={language === "ja" ? "全ツアーにおける未確定の手配タスク" : "Pending operational assignments across tours"}
                 badge={
                   <span className="text-[10px] font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
-                    {unconfirmedLogistics.length} pending
+                    {language === "ja" ? `${unconfirmedLogistics.length}件未完了` : `${unconfirmedLogistics.length} pending`}
                   </span>
                 }
               />
@@ -687,10 +728,12 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                     <CheckCircle2 size={16} />
                   </div>
                   <p className="text-xs font-semibold text-slate-800">
-                    All logistics fully confirmed
+                    {language === "ja" ? "全手配リソース確定済" : "All logistics fully confirmed"}
                   </p>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Guides, drivers, vehicles, and hotel vouchers are locked in.
+                    {language === "ja"
+                      ? "ガイド、ドライバー、車両、ホテルバウチャーの手配が完了しています。"
+                      : "Guides, drivers, vehicles, and hotel vouchers are locked in."}
                   </p>
                 </div>
               ) : (
@@ -699,11 +742,11 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                     <Link
                       key={`${item.tourId}-${item.type}-${idx}`}
                       href={`/tours/${item.tourId}`}
-                      className="flex items-center justify-between gap-3 p-3 hover:bg-slate-50 transition-colors"
+                      className="flex items-center justify-between gap-3 p-3 hover:bg-slate-50/80 transition-colors"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <div
-                          className="w-7 h-7 rounded bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 text-slate-600"
+                          className="w-7 h-7 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 text-slate-600"
                           aria-hidden="true"
                         >
                           {item.type === "guide" && <UserCheck size={13} />}
@@ -721,8 +764,8 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
                         </div>
                       </div>
 
-                      <span className="text-[10px] font-semibold text-blue-600 shrink-0">
-                        Assign
+                      <span className="text-[10px] font-semibold text-[#244d70] shrink-0">
+                        {language === "ja" ? "手配" : "Assign"}
                       </span>
                     </Link>
                   ))}
@@ -730,14 +773,17 @@ export function DashboardView({ initialTours, today }: DashboardViewProps) {
               )}
             </CardContent>
             <CardFooter className="flex items-center justify-between">
-              <span>Verified against current active tours</span>
-              <span className="text-blue-600 text-[11px] font-medium">
-                Auto-checked
+              <span>{language === "ja" ? "現在運行中の全ツアーと突合済" : "Verified against current active tours"}</span>
+              <span className="text-[#244d70] text-[11px] font-medium">
+                {language === "ja" ? "自動検証済" : "Auto-checked"}
               </span>
             </CardFooter>
           </Card>
         </div>
       </div>
+
+      {/* ── 4. Dedicated Travel Philosophy Quotes Section ────────────── */}
+      <QuotesCarousel />
     </PageContainer>
   );
 }

@@ -35,6 +35,7 @@ import { updateOperationalTour } from "@/lib/operations-client";
 import { detectAssignmentConflicts } from "@/lib/operations";
 import { formatDateShort } from "@/lib/utils";
 import { cn } from "@/components/ui/utils";
+import { useLanguage } from "@/lib/i18n";
 
 export interface AssignmentsViewProps {
   initialTours: Tour[];
@@ -61,6 +62,7 @@ interface FlattenedAssignment {
 }
 
 export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
+  const { t, language } = useLanguage();
   const [persistedTours, setPersistedTours] = useState<Record<string, Tour>>({});
 
   const sessionRaw = useSyncExternalStore(
@@ -79,15 +81,54 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
     return base.map((t) => persistedTours[t.id] ?? t);
   }, [initialTours, sessionState.tours, persistedTours]);
 
-  // Operational conflict detection across active tours
-  const conflicts = useMemo(() => {
-    return detectAssignmentConflicts(tours);
+  const [yearFilter, setYearFilter] = useState<string>("current");
+
+  const availableYears = useMemo(() => {
+    const yrs = new Set<string>();
+    tours.forEach((t) => {
+      if (t.arrivalDate) yrs.add(t.arrivalDate.slice(0, 4));
+      if (t.departureDate) yrs.add(t.departureDate.slice(0, 4));
+    });
+    return Array.from(yrs).filter(Boolean).sort().reverse();
   }, [tours]);
+
+  // Operational year subset (defaults to current 2025-2026 operations)
+  const yearTours = useMemo(() => {
+    if (yearFilter === "all") return tours;
+    return tours.filter((tour) => {
+      const arrY = tour.arrivalDate?.slice(0, 4);
+      const depY = tour.departureDate?.slice(0, 4);
+      if (yearFilter === "current") {
+        return arrY === "2025" || arrY === "2026" || depY === "2025" || depY === "2026";
+      }
+      return arrY === yearFilter || depY === yearFilter;
+    });
+  }, [tours, yearFilter]);
+
+  // Operational conflict detection across active tours in current period
+  const conflicts = useMemo(() => {
+    return detectAssignmentConflicts(yearTours);
+  }, [yearTours]);
 
   // Filters state
   const [roleFilter, setRoleFilter] = useState<AssignmentRole | "all" | "conflicts">("all");
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
+
+  function handleSearchChange(val: string) {
+    setSearchQuery(val);
+    setCurrentPage(1);
+  }
+
+  function handleRoleChange(role: AssignmentRole | "all" | "conflicts") {
+    setRoleFilter(role);
+    setCurrentPage(1);
+  }
+
+  function handleStatusChange(st: AssignmentStatus | "all") {
+    setStatusFilter(st);
+    setCurrentPage(1);
+  }
 
   // Edit / Reassign modal state
   const [editingAssignment, setEditingAssignment] = useState<FlattenedAssignment | null>(null);
@@ -101,13 +142,21 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 25;
+
   // Flatten assignments across non-cancelled tours
   const flattenedAssignments = useMemo(() => {
     const list: FlattenedAssignment[] = [];
-    tours
+    const standardRoles: AssignmentRole[] = ["guide", "driver", "vehicle"];
+
+    yearTours
       .filter((t) => t.status !== "cancelled")
       .forEach((tour) => {
+        const existingRoles = new Set<string>();
         tour.assignments.forEach((a, idx) => {
+          existingRoles.add(a.role);
           list.push({
             key: `${tour.id}-${a.role}-${idx}`,
             tourId: tour.id,
@@ -127,9 +176,28 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
             tour,
           });
         });
+
+        // Ensure missing core roles (e.g. driver) can be assigned directly by coordinators
+        standardRoles.forEach((role) => {
+          if (!existingRoles.has(role)) {
+            list.push({
+              key: `${tour.id}-${role}-missing`,
+              tourId: tour.id,
+              bookingReference: tour.bookingReference,
+              groupName: tour.group.groupName,
+              destination: tour.destination,
+              arrivalDate: tour.arrivalDate,
+              departureDate: tour.departureDate,
+              tourStatus: tour.status,
+              role,
+              status: "unassigned",
+              tour,
+            });
+          }
+        });
       });
     return list;
-  }, [tours]);
+  }, [yearTours]);
 
   // Quick summary counts
   const counts = useMemo(() => {
@@ -202,6 +270,12 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
     });
   }, [flattenedAssignments, roleFilter, statusFilter, searchQuery, conflicts]);
 
+  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
+
   // Open edit modal
   function openEdit(item: FlattenedAssignment) {
     setEditingAssignment(item);
@@ -227,8 +301,10 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
     setModalError(null);
 
     const currentTour = editingAssignment.tour;
+    let found = false;
     const updatedAssignments = currentTour.assignments.map((a) => {
       if (a.role === editingAssignment.role) {
+        found = true;
         return {
           ...a,
           status: draftStatus,
@@ -241,6 +317,19 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
       }
       return a;
     });
+
+    if (!found) {
+      updatedAssignments.push({
+        id: `asg-${currentTour.id}-${editingAssignment.role}`,
+        role: editingAssignment.role,
+        status: draftStatus,
+        name: draftName.trim() || undefined,
+        contact: draftContact.trim() || undefined,
+        reference: draftReference.trim() || undefined,
+        vehicleType: draftVehicleType ? (draftVehicleType as VehicleType) : undefined,
+        notes: draftNotes.trim() || undefined,
+      });
+    }
 
     const updatedTour: Tour = {
       ...currentTour,
@@ -303,13 +392,13 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
         >
           <div className="flex items-center gap-2 font-bold text-amber-900 text-sm">
             <ShieldAlert size={18} className="text-amber-600 shrink-0" />
-            <span>OPERATIONAL ALLOCATION CONFLICT DETECTED ({conflicts.length})</span>
+            <span>{t("assign.conflict_title")} ({conflicts.length})</span>
           </div>
           <p className="text-amber-800 leading-relaxed text-[11px]">
-            The system detected overlapping dates for the same assigned field resource across active tours. Double-booked staff cannot service multiple concurrent circuit itineraries:
+            {t("assign.conflict_desc")}
           </p>
           <div className="space-y-1.5 pt-1">
-            {conflicts.map((c, i) => (
+            {conflicts.slice(0, 5).map((c, i) => (
               <div
                 key={i}
                 className="bg-white/80 border border-amber-200 rounded p-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
@@ -337,6 +426,24 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
                 </div>
               </div>
             ))}
+            {conflicts.length > 5 && (
+              <div className="pt-1 flex items-center justify-between text-[11px] text-amber-900">
+                <span>
+                  {language === "ja"
+                    ? `全${conflicts.length}件中、最初の5件の重複を表示しています。`
+                    : `Showing first 5 of ${conflicts.length} allocation conflicts.`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRoleFilter("conflicts")}
+                  className="font-semibold underline hover:text-amber-950 cursor-pointer"
+                >
+                  {language === "ja"
+                    ? `重複警告の全${conflicts.length}件を絞り込み →`
+                    : `Filter list by all ${conflicts.length} conflicts →`}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -346,7 +453,7 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
         <Card className="p-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Tour Guides
+              {t("assign.guides_kpi")}
             </span>
             <UserCheck size={16} className="text-blue-600" />
           </div>
@@ -354,10 +461,10 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
             <span className="text-xl font-bold text-slate-900 font-mono">
               {counts.guidesAssigned}
             </span>
-            <span className="text-xs text-slate-500 font-medium">Assigned</span>
+            <span className="text-xs text-slate-500 font-medium">{t("assign.status_assigned")}</span>
             {counts.guidesPending > 0 && (
               <span className="text-xs font-semibold text-amber-700 font-mono">
-                ({counts.guidesPending} pending)
+                ({counts.guidesPending} {language === "ja" ? "未確定" : "pending"})
               </span>
             )}
           </div>
@@ -366,7 +473,7 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
         <Card className="p-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Chauffeurs & Drivers
+              {t("assign.drivers_kpi")}
             </span>
             <UserCheck size={16} className="text-emerald-600" />
           </div>
@@ -374,10 +481,10 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
             <span className="text-xl font-bold text-slate-900 font-mono">
               {counts.driversAssigned}
             </span>
-            <span className="text-xs text-slate-500 font-medium">Allocated</span>
+            <span className="text-xs text-slate-500 font-medium">{language === "ja" ? "配属済" : "Allocated"}</span>
             {counts.driversPending > 0 && (
               <span className="text-xs font-semibold text-amber-700 font-mono">
-                ({counts.driversPending} pending)
+                ({counts.driversPending} {language === "ja" ? "未確定" : "pending"})
               </span>
             )}
           </div>
@@ -386,7 +493,7 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
         <Card className="p-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Vehicles & Fleet
+              {t("assign.vehicles_kpi")}
             </span>
             <Car size={16} className="text-purple-600" />
           </div>
@@ -394,10 +501,10 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
             <span className="text-xl font-bold text-slate-900 font-mono">
               {counts.vehiclesAssigned}
             </span>
-            <span className="text-xs text-slate-500 font-medium">Ready</span>
+            <span className="text-xs text-slate-500 font-medium">{t("tours.ready")}</span>
             {counts.vehiclesPending > 0 && (
               <span className="text-xs font-semibold text-amber-700 font-mono">
-                ({counts.vehiclesPending} pending)
+                ({counts.vehiclesPending} {language === "ja" ? "未確定" : "pending"})
               </span>
             )}
           </div>
@@ -406,7 +513,7 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
         <Card className="p-3">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Schedule Conflicts
+              {language === "ja" ? "配属競合・重複" : "Schedule Conflicts"}
             </span>
             <ShieldAlert size={16} className={counts.conflictsCount > 0 ? "text-amber-600" : "text-emerald-600"} />
           </div>
@@ -418,14 +525,16 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
               {counts.conflictsCount}
             </span>
             <span className="text-xs text-slate-500 font-medium">
-              {counts.conflictsCount === 0 ? "No Double Bookings" : "Conflicts Active"}
+              {counts.conflictsCount === 0
+                ? (language === "ja" ? "重複なし" : "No Double Bookings")
+                : (language === "ja" ? "競合発生中" : "Conflicts Active")}
             </span>
           </div>
         </Card>
       </div>
 
       {/* ── Filters & Search Ribbon ─────────────────────────────────────────── */}
-      <div className="bg-white border border-slate-200/90 rounded-lg p-3.5 shadow-xs space-y-3">
+      <div className="bg-white border border-slate-200/85 rounded-xl p-3.5 shadow-2xs space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           {/* Search bar */}
           <div className="relative flex-1 max-w-md">
@@ -435,15 +544,15 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
             />
             <input
               type="search"
-              placeholder="Search by tour ref, party name, resource name, or vehicle…"
+              placeholder={t("assign.search_placeholder")}
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-md focus:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="w-full pl-9 pr-8 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#244d70] transition-colors"
             />
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => setSearchQuery("")}
+                onClick={() => handleSearchChange("")}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
                 <X size={14} />
@@ -451,23 +560,59 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
             )}
           </div>
 
+          {/* Operational Period Filter */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-slate-400 font-semibold uppercase text-[10px]">
+              {language === "ja" ? "対象期間:" : "Period:"}
+            </span>
+            <select
+              value={yearFilter}
+              onChange={(e) => {
+                setYearFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              aria-label="Filter assignments by operational period"
+              className="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-[#244d70] cursor-pointer shadow-2xs"
+            >
+              <option value="current">
+                {language === "ja" ? "現行運行 (2025–2026)" : "Current Operations (2025–2026)"}
+              </option>
+              <option value="all">
+                {language === "ja" ? "全年度・全記録 (2016–2026)" : "All Years (Complete Archive)"}
+              </option>
+              {availableYears.map((yr) => (
+                <option key={yr} value={yr}>
+                  {yr}{language === "ja" ? "年度" : " Operations"}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Status selector */}
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-slate-400 font-semibold uppercase text-[10px]">Status:</span>
-            <div className="flex items-center gap-1 border border-slate-200 rounded p-0.5 bg-slate-50">
+            <span className="text-slate-400 font-semibold uppercase text-[10px]">
+              {language === "ja" ? "状態:" : "Status:"}
+            </span>
+            <div className="flex items-center gap-1 border border-slate-200 rounded-lg p-0.5 bg-slate-50">
               {(["all", "assigned", "pending", "unassigned"] as const).map((st) => (
                 <button
                   key={st}
                   type="button"
-                  onClick={() => setStatusFilter(st)}
+                  onClick={() => handleStatusChange(st)}
                   className={cn(
-                    "px-2 py-0.5 rounded text-[11px] font-semibold transition-colors capitalize",
+                    "px-2 py-0.5 rounded text-[11px] font-semibold transition-colors capitalize btn-press",
                     statusFilter === st
-                      ? "bg-white text-slate-900 shadow-xs"
+                      ? "bg-white text-[#172d43] shadow-xs font-bold"
                       : "text-slate-500 hover:text-slate-900"
                   )}
                 >
-                  {st === "all" ? "All" : st}
+                  {st === "all"
+                    ? (language === "ja" ? "すべて" : "All")
+                    : st === "assigned"
+                    ? (language === "ja" ? "配属済" : "Assigned")
+                    : st === "pending"
+                    ? (language === "ja" ? "手配中" : "Pending")
+                    : (language === "ja" ? "未配属" : "Unassigned")}
                 </button>
               ))}
             </div>
@@ -477,72 +622,72 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
         {/* Role tabs */}
         <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100">
           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mr-1">
-            Resource Role:
+            {language === "ja" ? "リソース種別:" : "Resource Role:"}
           </span>
           <button
             type="button"
-            onClick={() => setRoleFilter("all")}
+            onClick={() => handleRoleChange("all")}
             className={cn(
-              "px-2.5 py-1 rounded text-xs font-semibold transition-colors",
+              "px-2.5 py-1 rounded text-xs font-semibold transition-colors btn-press",
               roleFilter === "all"
-                ? "bg-slate-900 text-white shadow-xs"
+                ? "bg-[#172d43] text-white shadow-xs font-bold"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             )}
           >
-            All Roles ({flattenedAssignments.length})
+            {language === "ja" ? "全種別" : "All Roles"} ({flattenedAssignments.length})
           </button>
           <button
             type="button"
-            onClick={() => setRoleFilter("guide")}
+            onClick={() => handleRoleChange("guide")}
             className={cn(
-              "inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors",
+              "inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors btn-press",
               roleFilter === "guide"
-                ? "bg-blue-600 text-white shadow-xs"
-                : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                ? "bg-[#244d70] text-white shadow-xs font-bold"
+                : "bg-[#dcecf7]/60 text-[#244d70] hover:bg-[#dcecf7]"
             )}
           >
             <UserCheck size={12} />
-            Tour Guides
+            {t("assign.role_guide")}
           </button>
           <button
             type="button"
-            onClick={() => setRoleFilter("driver")}
+            onClick={() => handleRoleChange("driver")}
             className={cn(
-              "inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors",
+              "inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors btn-press",
               roleFilter === "driver"
-                ? "bg-emerald-600 text-white shadow-xs"
+                ? "bg-emerald-600 text-white shadow-xs font-bold"
                 : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
             )}
           >
             <UserCheck size={12} />
-            Drivers & Chauffeurs
+            {t("assign.role_driver")}
           </button>
           <button
             type="button"
-            onClick={() => setRoleFilter("vehicle")}
+            onClick={() => handleRoleChange("vehicle")}
             className={cn(
-              "inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors",
+              "inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors btn-press",
               roleFilter === "vehicle"
-                ? "bg-purple-600 text-white shadow-xs"
+                ? "bg-purple-600 text-white shadow-xs font-bold"
                 : "bg-purple-50 text-purple-700 hover:bg-purple-100"
             )}
           >
             <Car size={12} />
-            Fleet Vehicles
+            {t("assign.role_vehicle")}
           </button>
           {conflicts.length > 0 && (
             <button
               type="button"
-              onClick={() => setRoleFilter("conflicts")}
+              onClick={() => handleRoleChange("conflicts")}
               className={cn(
-                "inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors ml-auto",
+                "inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-colors ml-auto btn-press",
                 roleFilter === "conflicts"
-                  ? "bg-amber-600 text-white shadow-xs"
+                  ? "bg-amber-600 text-white shadow-xs font-bold"
                   : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300"
               )}
             >
               <ShieldAlert size={12} />
-              Conflicts Only ({conflicts.length})
+              {language === "ja" ? `重複・競合 (${conflicts.length})` : `Conflicts Only (${conflicts.length})`}
             </button>
           )}
         </div>
@@ -553,39 +698,43 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
         <CardHeader className="bg-slate-50/50 py-2.5 px-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-              Resource Dispatch & Allocation Roster
+              {language === "ja" ? "リソース配属・運行台帳" : "Resource Dispatch & Allocation Roster"}
             </h2>
             <Badge variant="neutral" className="font-mono text-[10px]">
-              {filtered.length} entries
+              {filtered.length} {language === "ja" ? "件" : "entries"}
             </Badge>
           </div>
           <span className="text-[11px] text-slate-400 hidden sm:inline">
-            Click &quot;Reassign&quot; to update dispatch status
+            {language === "ja" ? "「変更」ボタンで配属情報を更新" : 'Click "Reassign" to update dispatch status'}
           </span>
         </CardHeader>
 
         {filtered.length === 0 ? (
           <div className="p-8 text-center">
             <UserCheck size={28} className="text-slate-300 mx-auto mb-2" />
-            <p className="text-xs font-semibold text-slate-700">No allocations match your filter</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Try clearing your search query or filter tags.</p>
+            <p className="text-xs font-semibold text-slate-700">
+              {language === "ja" ? "該当する配属リソースがありません" : "No allocations match your filter"}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {language === "ja" ? "検索キーワードや絞り込み条件を変更してください。" : "Try clearing your search query or filter tags."}
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead className="bg-slate-50/90 text-slate-600 text-[11px] uppercase font-bold tracking-wider border-b border-slate-200">
                 <tr>
-                  <th className="py-2.5 px-3">Tour Ref & Group</th>
-                  <th className="py-2.5 px-3">Circuit Dates & City</th>
-                  <th className="py-2.5 px-3">Role</th>
-                  <th className="py-2.5 px-3">Assigned Resource</th>
-                  <th className="py-2.5 px-3">Contact / Plate</th>
-                  <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3 text-right">Actions</th>
+                  <th className="py-2.5 px-3">{language === "ja" ? "ツアー番号・団体" : "Tour Ref & Group"}</th>
+                  <th className="py-2.5 px-3">{language === "ja" ? "周遊日程・行先" : "Circuit Dates & City"}</th>
+                  <th className="py-2.5 px-3">{language === "ja" ? "種別" : "Role"}</th>
+                  <th className="py-2.5 px-3">{language === "ja" ? "配属リソース" : "Assigned Resource"}</th>
+                  <th className="py-2.5 px-3">{language === "ja" ? "連絡先・車番" : "Contact / Plate"}</th>
+                  <th className="py-2.5 px-3">{t("tours.col_status")}</th>
+                  <th className="py-2.5 px-3 text-right">{t("tours.col_actions")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((item) => {
+                {paginated.map((item) => {
                   const isConflicted = conflicts.some(
                     (c) =>
                       c.resourceType === item.role &&
@@ -627,7 +776,11 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
                       {/* Role */}
                       <td className="py-2.5 px-3 whitespace-nowrap">
                         <span className="font-semibold uppercase tracking-wider text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                          {item.role}
+                          {item.role === "guide"
+                            ? (language === "ja" ? "ガイド" : "guide")
+                            : item.role === "driver"
+                            ? (language === "ja" ? "ドライバー" : "driver")
+                            : (language === "ja" ? "車両" : "vehicle")}
                         </span>
                       </td>
 
@@ -635,12 +788,12 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
                       <td className="py-2.5 px-3 whitespace-nowrap">
                         <div className="font-medium text-slate-900">
                           {item.role === "vehicle"
-                            ? item.vehicleType || "Vehicle not selected"
-                            : item.name || "Pending allocation"}
+                            ? item.vehicleType || (language === "ja" ? "車種未選択" : "Vehicle not selected")
+                            : item.name || (language === "ja" ? "手配中" : "Pending allocation")}
                         </div>
                         {isConflicted && (
                           <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 font-bold bg-amber-100 px-1.5 py-0.2 rounded mt-0.5">
-                            <AlertTriangle size={10} /> Double-booked
+                            <AlertTriangle size={10} /> {language === "ja" ? "重複配属" : "Double-booked"}
                           </span>
                         )}
                       </td>
@@ -665,7 +818,7 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
                           className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition-colors"
                         >
                           <Edit3 size={12} />
-                          <span>Reassign</span>
+                          <span>{language === "ja" ? "変更" : "Reassign"}</span>
                         </button>
                       </td>
                     </tr>
@@ -673,6 +826,40 @@ export function AssignmentsView({ initialTours }: AssignmentsViewProps) {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination Controls */}
+        {filtered.length > pageSize && (
+          <div className="p-3 border-t border-slate-200 bg-slate-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <span className="text-slate-600 font-medium">
+              {t("pagination.showing")}{" "}
+              <strong className="text-slate-900 font-mono">{(currentPage - 1) * pageSize + 1}</strong>{" "}
+              {t("pagination.of")}{" "}
+              <strong className="text-slate-900 font-mono">{Math.min(currentPage * pageSize, filtered.length)}</strong>{" "}
+              ({filtered.length} {language === "ja" ? "件" : "assignments"})
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 disabled:opacity-40 hover:bg-slate-100 font-medium transition-colors"
+              >
+                {t("pagination.prev")}
+              </button>
+              <span className="px-2 font-mono text-slate-700 font-semibold">
+                {t("pagination.page")} {currentPage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 disabled:opacity-40 hover:bg-slate-100 font-medium transition-colors"
+              >
+                {t("pagination.next")}
+              </button>
+            </div>
           </div>
         )}
 

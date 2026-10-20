@@ -34,10 +34,10 @@ import {
 } from "@/lib/session-store";
 import {
   formatDate,
-  formatDateShort,
   relativeDayLabel,
 } from "@/lib/utils";
 import { cn } from "@/components/ui/utils";
+import { useLanguage } from "@/lib/i18n";
 
 export interface CalendarViewProps {
   initialTours: Tour[];
@@ -67,8 +67,10 @@ interface CalendarEvent {
 }
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const WEEKDAYS_JA = ["月", "火", "水", "木", "金", "土", "日"];
 
 export function CalendarView({ initialTours, referenceDate }: CalendarViewProps) {
+  const { t, language } = useLanguage();
   const sessionRaw = useSyncExternalStore(
     subscribeSessionStore,
     getSessionSnapshot,
@@ -128,23 +130,28 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
       const vehicle = tour.assignments.find((a) => a.role === "vehicle")?.vehicleType;
       const pax = tour.group.adultCount + tour.group.childCount;
 
-      // Inbound flight arrival
+      // Inbound flight arrival or scheduled tour arrival
       const arrFlight = tour.flights.find((f) => f.direction === "arrival");
-      if (arrFlight) {
+      const arrivalDate = arrFlight?.date || tour.arrivalDate;
+      if (arrivalDate) {
         events.push({
           id: `${tour.id}-arr`,
           tourId: tour.id,
           bookingReference: tour.bookingReference,
           groupName: tour.group.groupName,
-          date: arrFlight.date, // Arrival flight schedule date
+          date: arrivalDate,
           type: "arrival",
-          title: `Arr: ${arrFlight.flightNumber} (${tour.bookingReference})`,
-          subtext: `${tour.group.groupName} · ${pax} pax · Land ${arrFlight.arrivalTime || "TBD"}`,
+          title: arrFlight
+            ? `Arr: ${arrFlight.flightNumber} (${tour.bookingReference})`
+            : `Arr: ${tour.bookingReference} (${tour.destination || "Arrival"})`,
+          subtext: `${tour.group.groupName} · ${pax} pax${
+            arrFlight?.arrivalTime ? ` · Land ${arrFlight.arrivalTime}` : " · Tour Start"
+          }`,
           status: tour.status,
-          time: arrFlight.arrivalTime,
+          time: arrFlight?.arrivalTime,
           details: {
-            flightNumber: arrFlight.flightNumber,
-            terminal: arrFlight.terminal,
+            flightNumber: arrFlight?.flightNumber,
+            terminal: arrFlight?.terminal,
             pax,
             destination: tour.destination,
             guideName: guide,
@@ -154,23 +161,28 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
         });
       }
 
-      // Outbound flight departure
+      // Outbound flight departure or scheduled tour departure
       const depFlight = tour.flights.find((f) => f.direction === "departure");
-      if (depFlight) {
+      const departureDate = depFlight?.date || tour.departureDate;
+      if (departureDate) {
         events.push({
           id: `${tour.id}-dep`,
           tourId: tour.id,
           bookingReference: tour.bookingReference,
           groupName: tour.group.groupName,
-          date: depFlight.date,
+          date: departureDate,
           type: "departure",
-          title: `Dep: ${depFlight.flightNumber} (${tour.bookingReference})`,
-          subtext: `${tour.group.groupName} · Outbound ${depFlight.departureTime || "TBD"}`,
+          title: depFlight
+            ? `Dep: ${depFlight.flightNumber} (${tour.bookingReference})`
+            : `Dep: ${tour.bookingReference} (${tour.destination || "Departure"})`,
+          subtext: `${tour.group.groupName} · ${
+            depFlight?.departureTime ? `Outbound ${depFlight.departureTime}` : "Tour End"
+          }`,
           status: tour.status,
-          time: depFlight.departureTime,
+          time: depFlight?.departureTime,
           details: {
-            flightNumber: depFlight.flightNumber,
-            terminal: depFlight.terminal,
+            flightNumber: depFlight?.flightNumber,
+            terminal: depFlight?.terminal,
             pax,
             destination: tour.destination,
             guideName: guide,
@@ -290,11 +302,6 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
     return filteredEvents.filter((e) => e.date === selectedDate);
   }, [filteredEvents, selectedDate]);
 
-  const monthLabel = new Date(Date.UTC(currentYear, currentMonth - 1, 1)).toLocaleDateString(
-    "en-GB",
-    { month: "long", year: "numeric", timeZone: "UTC" }
-  );
-
   return (
     <PageContainer>
       {/* Session storage alert */}
@@ -311,14 +318,14 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
       )}
 
       {/* ── Calendar Controls Ribbon ────────────────────────────────────────── */}
-      <div className="bg-white border border-slate-200/90 rounded-lg p-3.5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <div className="bg-white border border-slate-200/85 rounded-xl p-3.5 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
         {/* Month Navigation */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center border border-slate-200 rounded-md bg-slate-50 p-0.5">
+          <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50 p-0.5">
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="p-1 text-slate-600 hover:text-slate-900 hover:bg-white rounded transition-colors"
+              className="p-1 text-slate-600 hover:text-slate-900 hover:bg-white rounded transition-colors btn-press"
               aria-label="Previous month"
             >
               <ChevronLeft size={16} />
@@ -326,77 +333,113 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
             <button
               type="button"
               onClick={handleToday}
-              className="px-2.5 py-1 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-white rounded transition-colors"
+              className="px-2.5 py-1 text-xs font-bold text-[#172d43] hover:text-[#244d70] hover:bg-white rounded transition-colors btn-press"
             >
-              Today
+              {t("cal.today")}
             </button>
             <button
               type="button"
               onClick={handleNextMonth}
-              className="p-1 text-slate-600 hover:text-slate-900 hover:bg-white rounded transition-colors"
+              className="p-1 text-slate-600 hover:text-slate-900 hover:bg-white rounded transition-colors btn-press"
               aria-label="Next month"
             >
               <ChevronRight size={16} />
             </button>
           </div>
-          <h2 className="text-base font-bold text-slate-900 min-w-[150px]">
-            {monthLabel}
-          </h2>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={currentMonth}
+              onChange={(e) => setCurrentMonth(Number(e.target.value))}
+              aria-label="Select calendar month"
+              className="text-xs bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded px-2 py-1 font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#244d70]"
+            >
+              {[
+                { value: 1, label: language === "ja" ? "1月" : "January" },
+                { value: 2, label: language === "ja" ? "2月" : "February" },
+                { value: 3, label: language === "ja" ? "3月" : "March" },
+                { value: 4, label: language === "ja" ? "4月" : "April" },
+                { value: 5, label: language === "ja" ? "5月" : "May" },
+                { value: 6, label: language === "ja" ? "6月" : "June" },
+                { value: 7, label: language === "ja" ? "7月" : "July" },
+                { value: 8, label: language === "ja" ? "8月" : "August" },
+                { value: 9, label: language === "ja" ? "9月" : "September" },
+                { value: 10, label: language === "ja" ? "10月" : "October" },
+                { value: 11, label: language === "ja" ? "11月" : "November" },
+                { value: 12, label: language === "ja" ? "12月" : "December" },
+              ].map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={currentYear}
+              onChange={(e) => setCurrentYear(Number(e.target.value))}
+              aria-label="Select calendar year"
+              className="text-xs bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded px-2 py-1 font-mono font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#244d70]"
+            >
+              {[2027, 2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016].map((yr) => (
+                <option key={yr} value={yr}>
+                  {yr}{language === "ja" ? "年" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1 text-xs border border-slate-200 rounded-md p-1 bg-slate-50">
+        <div className="flex items-center gap-2 flex-wrap max-w-full">
+          <div className="flex items-center gap-1 text-xs border border-slate-200 rounded-lg p-1 bg-slate-50 overflow-x-auto max-w-full">
             <button
               type="button"
               onClick={() => setTypeFilter("all")}
               className={cn(
-                "px-2 py-0.5 rounded text-[11px] font-semibold transition-colors",
+                "px-2.5 py-1 rounded text-[11px] font-semibold transition-colors btn-press",
                 typeFilter === "all"
-                  ? "bg-white text-slate-900 shadow-xs"
+                  ? "bg-white text-[#172d43] shadow-xs font-bold"
                   : "text-slate-500 hover:text-slate-900"
               )}
             >
-              All Events
+              {t("cal.all_events")}
             </button>
             <button
               type="button"
               onClick={() => setTypeFilter("arrival")}
               className={cn(
-                "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold transition-colors",
+                "inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors btn-press",
                 typeFilter === "arrival"
-                  ? "bg-blue-600 text-white shadow-xs"
-                  : "text-slate-500 hover:text-blue-700"
+                  ? "bg-[#244d70] text-white shadow-xs font-bold"
+                  : "text-slate-500 hover:text-[#244d70]"
               )}
             >
               <PlaneLanding size={12} />
-              Arrivals
+              {t("cal.arrivals")}
             </button>
             <button
               type="button"
               onClick={() => setTypeFilter("departure")}
               className={cn(
-                "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold transition-colors",
+                "inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors btn-press",
                 typeFilter === "departure"
-                  ? "bg-slate-700 text-white shadow-xs"
+                  ? "bg-slate-700 text-white shadow-xs font-bold"
                   : "text-slate-500 hover:text-slate-900"
               )}
             >
               <PlaneTakeoff size={12} />
-              Departures
+              {t("cal.departures")}
             </button>
             <button
               type="button"
               onClick={() => setTypeFilter("itinerary")}
               className={cn(
-                "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold transition-colors",
+                "inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors btn-press",
                 typeFilter === "itinerary"
-                  ? "bg-emerald-600 text-white shadow-xs"
+                  ? "bg-emerald-600 text-white shadow-xs font-bold"
                   : "text-slate-500 hover:text-emerald-700"
               )}
             >
               <Compass size={12} />
-              Tours
+              {language === "ja" ? "周遊日程" : "Tours"}
             </button>
           </div>
 
@@ -405,9 +448,9 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
               type="checkbox"
               checked={hideCancelled}
               onChange={(e) => setHideCancelled(e.target.checked)}
-              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              className="rounded border-slate-300 text-[#244d70] focus:ring-[#244d70]"
             />
-            <span>Hide Cancelled</span>
+            <span>{language === "ja" ? "キャンセル非表示" : "Hide Cancelled"}</span>
           </label>
         </div>
       </div>
@@ -419,7 +462,7 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
           <Card className="overflow-hidden">
             {/* Weekday headers */}
             <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/75 text-center text-xs font-bold text-slate-600 py-2">
-              {WEEKDAYS.map((w) => (
+              {(language === "ja" ? WEEKDAYS_JA : WEEKDAYS).map((w) => (
                 <div key={w}>{w}</div>
               ))}
             </div>
@@ -434,17 +477,17 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
                     type="button"
                     onClick={() => setSelectedDate(day.dateString)}
                     className={cn(
-                      "min-h-[92px] p-1.5 flex flex-col text-left transition-colors relative hover:bg-blue-50/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-500",
+                      "min-h-[92px] p-1.5 flex flex-col text-left transition-colors relative hover:bg-[#dcecf7]/30 focus:outline-none focus-visible:ring-1 focus-visible:ring-[#244d70]",
                       !day.isCurrentMonth && "bg-slate-50/50 text-slate-400",
                       day.isCurrentMonth && "bg-white",
-                      isSelected && "bg-blue-50/60 ring-2 ring-inset ring-blue-500 z-10"
+                      isSelected && "bg-[#dcecf7]/50 ring-2 ring-inset ring-[#244d70] z-10"
                     )}
                   >
                     <div className="flex items-center justify-between w-full mb-1">
                       <span
                         className={cn(
                           "inline-flex items-center justify-center w-5 h-5 text-xs font-semibold rounded-full",
-                          day.isToday && "bg-blue-600 text-white font-bold",
+                          day.isToday && "bg-[#244d70] text-white font-bold",
                           !day.isToday && day.isCurrentMonth && "text-slate-800",
                           !day.isToday && !day.isCurrentMonth && "text-slate-400"
                         )}
@@ -479,7 +522,7 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
                       ))}
                       {day.events.length > 2 && (
                         <div className="text-[9px] text-slate-500 font-semibold pl-0.5">
-                          +{day.events.length - 2} more
+                          +{day.events.length - 2} {language === "ja" ? "件" : "more"}
                         </div>
                       )}
                     </div>
@@ -492,19 +535,19 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
               <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1">
                   <span className="w-2.5 h-2.5 rounded-sm bg-blue-100 border border-blue-300" />
-                  <span className="text-[11px]">Arrival Flight</span>
+                  <span className="text-[11px]">{language === "ja" ? "到着便" : "Arrival Flight"}</span>
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="w-2.5 h-2.5 rounded-sm bg-slate-200 border border-slate-300" />
-                  <span className="text-[11px]">Departure Transfer</span>
+                  <span className="text-[11px]">{language === "ja" ? "出発送迎" : "Departure Transfer"}</span>
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="w-2.5 h-2.5 rounded-sm bg-emerald-100 border border-emerald-300" />
-                  <span className="text-[11px]">Tour Itinerary</span>
+                  <span className="text-[11px]">{language === "ja" ? "周遊行程" : "Tour Itinerary"}</span>
                 </span>
               </div>
               <span className="text-[11px] font-mono">
-                Click any cell to inspect day schedule
+                {language === "ja" ? "日付をクリックして予定を確認" : "Click any cell to inspect day schedule"}
               </span>
             </CardFooter>
           </Card>
@@ -517,7 +560,7 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-bold text-slate-900">
-                    Day Schedule
+                    {language === "ja" ? "日別運行スケジュール" : "Day Schedule"}
                   </h3>
                   <Badge variant={selectedDate === referenceDate ? "info" : "neutral"} className="text-[10px]">
                     {relativeDayLabel(selectedDate, referenceDate)}
@@ -528,7 +571,7 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
                 </p>
               </div>
               <span className="text-xs font-mono font-bold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded">
-                {selectedDayEvents.length} {selectedDayEvents.length === 1 ? "movement" : "movements"}
+                {selectedDayEvents.length} {language === "ja" ? "件の発着" : selectedDayEvents.length === 1 ? "movement" : "movements"}
               </span>
             </CardHeader>
 
@@ -537,10 +580,10 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
                 <div className="text-center py-10 px-4">
                   <CalendarIcon size={28} className="text-slate-300 mx-auto mb-2" />
                   <p className="text-xs font-semibold text-slate-700">
-                    No scheduled movements
+                    {language === "ja" ? "この日の発着予定はありません" : "No scheduled movements"}
                   </p>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    No arrivals, departures, or itinerary activities logged for {formatDateShort(selectedDate)}.
+                    {t("cal.no_events")}
                   </p>
                 </div>
               ) : (
@@ -554,17 +597,17 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
                         <div className="flex items-center gap-1.5">
                           {ev.type === "arrival" && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
-                              <PlaneLanding size={11} /> ARRIVAL
+                              <PlaneLanding size={11} /> {t("cal.movement_arrival")}
                             </span>
                           )}
                           {ev.type === "departure" && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
-                              <PlaneTakeoff size={11} /> DEPARTURE
+                              <PlaneTakeoff size={11} /> {t("cal.movement_departure")}
                             </span>
                           )}
                           {ev.type === "itinerary" && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                              <Compass size={11} /> CIRCUIT
+                              <Compass size={11} /> {t("cal.movement_circuit")}
                             </span>
                           )}
                           <span className="text-[11px] font-mono font-bold text-slate-800">
@@ -600,7 +643,7 @@ export function CalendarView({ initialTours, referenceDate }: CalendarViewProps)
                       {ev.details?.pax !== undefined && (
                         <div className="flex items-center gap-1">
                           <Users size={12} className="text-slate-400 shrink-0" />
-                          <span>{ev.details.pax} Guests</span>
+                          <span>{ev.details.pax} {t("cal.guests_count")}</span>
                         </div>
                       )}
                       {ev.details?.guideName && (

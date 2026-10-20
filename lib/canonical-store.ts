@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Tour, ImportPreviewResult, ImportSummary, TourStatus } from "./types";
+import { computeTourLifecycleStatus } from "./operations";
+import { getIndiaTodayISO } from "./utils";
 
 const DATA_DIR = path.resolve(process.cwd(), "data/imported");
 const CANONICAL_FILE = path.join(DATA_DIR, "canonical_dataset.json");
@@ -291,23 +293,55 @@ export function saveCanonicalDataset(
 /**
  * Retrieve canonical tours list if operational dataset is active.
  */
-export function getCanonicalTours(): Tour[] {
+export function getCanonicalTours(referenceDate: string = getIndiaTodayISO()): Tour[] {
   const dataset = getCanonicalDataset();
   if (dataset && dataset.activeMode === "operational" && dataset.tours.length > 0) {
-    return dataset.tours;
+    return dataset.tours.map((t) => ({
+      ...t,
+      status: computeTourLifecycleStatus(t, referenceDate),
+    }));
   }
   return [];
 }
 
 /**
  * Retrieve a specific tour by ID or booking reference from canonical dataset.
+ * Priority: Exact primary tour ID first, exact sourceRecordId second, then booking reference.
  */
-export function getCanonicalTourById(idOrRef: string): Tour | undefined {
-  const tours = getCanonicalTours();
+export function getCanonicalTourById(
+  idOrRef: string,
+  referenceDate: string = getIndiaTodayISO()
+): Tour | undefined {
+  const tours = getCanonicalTours(referenceDate);
   const clean = idOrRef.toLowerCase().trim();
+
+  // 1. Strict primary ID match
+  const byId = tours.find((t) => t.id.toLowerCase() === clean);
+  if (byId) return byId;
+
+  // 2. Strict source record ID match (e.g. 'OCT 23:R21:1222824')
+  const bySource = tours.find((t) => t.sourceRecordId?.toLowerCase() === clean);
+  if (bySource) return bySource;
+
+  // 3. Fallback to booking reference or satf-{ref} prefix
   return tours.find(
     (t) =>
-      t.id.toLowerCase() === clean ||
+      t.bookingReference.toLowerCase() === clean ||
+      `satf-${t.bookingReference.toLowerCase()}` === clean
+  );
+}
+
+/**
+ * Retrieve all canonical tours sharing a specific booking reference.
+ */
+export function getCanonicalToursByRef(
+  bookingRef: string,
+  referenceDate: string = getIndiaTodayISO()
+): Tour[] {
+  const tours = getCanonicalTours(referenceDate);
+  const clean = bookingRef.toLowerCase().trim();
+  return tours.filter(
+    (t) =>
       t.bookingReference.toLowerCase() === clean ||
       `satf-${t.bookingReference.toLowerCase()}` === clean
   );

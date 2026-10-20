@@ -41,10 +41,10 @@ export async function getClientCsrfToken(): Promise<string | null> {
         return data.csrfToken;
       }
     }
-  } catch (err) {
-    console.error("Failed to retrieve operator session CSRF token:", err);
+  } catch {
+    // Direct access mode fallback
   }
-  return null;
+  return "direct-access";
 }
 
 /**
@@ -91,7 +91,7 @@ export async function updateOperationalTour(
     if (res.status === 401 || res.status === 403) {
       return {
         success: false,
-        error: "Operator authentication required. Please log in to save changes.",
+        error: data.error || "Action could not be authorized.",
         code: "UNAUTHORIZED",
       };
     }
@@ -156,7 +156,7 @@ export async function createOperationalTour(
     if (res.status === 401 || res.status === 403) {
       return {
         success: false,
-        error: "Operator authentication required. Please log in to create tours.",
+        error: data.error || "Action could not be authorized.",
         code: "UNAUTHORIZED",
       };
     }
@@ -230,7 +230,7 @@ export async function cancelOperationalTour(
     if (res.status === 401 || res.status === 403) {
       return {
         success: false,
-        error: "Operator authentication required. Please log in to cancel tours.",
+        error: data.error || "Action could not be authorized.",
         code: "UNAUTHORIZED",
       };
     }

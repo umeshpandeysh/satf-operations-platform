@@ -30,6 +30,7 @@ import {
   cancelTourEdit,
   mergeSessionTours,
   detectAssignmentConflicts,
+  computeTourLifecycleStatus,
 } from "../lib/operations";
 
 import {
@@ -1305,5 +1306,222 @@ describe("14. Tour lifecycle, creation, cancellation, and conflict detection", (
     assert.strictEqual(driverConflict.resourceIdentifier, "Vikram Singh");
   });
 });
+
+describe("27. Tour Lifecycle Status Determination & Historical Integrity (computeTourLifecycleStatus)", () => {
+  const refToday = "2026-10-20"; // Asia/Kolkata reference date
+
+  test("Historical tour whose departure is in past displays as COMPLETED, never UPCOMING", () => {
+    // April 2016 tour (the exact bug reported by user)
+    const tour2016 = {
+      bookingReference: "1234567",
+      status: "upcoming" as const, // Excel parser previously hardcoded upcoming
+      arrivalDate: "2016-04-10",
+      departureDate: "2016-04-15",
+    };
+    const computed = computeTourLifecycleStatus(tour2016, refToday);
+    assert.strictEqual(computed, "completed", "2016 historical tour must compute to completed");
+    // Ensure historical dates were NOT rewritten
+    assert.strictEqual(tour2016.arrivalDate, "2016-04-10");
+    assert.strictEqual(tour2016.departureDate, "2016-04-15");
+  });
+
+  test("2017, 2018, 2019, 2022, 2023, 2024 historical tours correctly compute to completed", () => {
+    const historicalDates = [
+      { arr: "2017-03-01", dep: "2017-03-08" },
+      { arr: "2018-09-15", dep: "2018-09-22" },
+      { arr: "2019-11-10", dep: "2019-11-15" },
+      { arr: "2022-12-05", dep: "2022-12-10" },
+      { arr: "2023-08-01", dep: "2023-08-07" },
+      { arr: "2024-10-01", dep: "2024-10-10" },
+      { arr: "2026-10-01", dep: "2026-10-18" }, // Departed 2 days ago relative to 2026-10-20
+    ];
+    for (const h of historicalDates) {
+      const res = computeTourLifecycleStatus({
+        status: "upcoming",
+        arrivalDate: h.arr,
+        departureDate: h.dep,
+      }, refToday);
+      assert.strictEqual(res, "completed", `Tour with departure ${h.dep} must be completed`);
+    }
+  });
+
+  test("Currently active tour running today displays as ACTIVE", () => {
+    // Spanning today: started 3 days ago, ends today (e.g. 1273812 KONAYASHI YUSUKE MR)
+    const activeTour1 = {
+      status: "upcoming" as const,
+      arrivalDate: "2026-10-17",
+      departureDate: "2026-10-20",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(activeTour1, refToday), "active");
+
+    // Starting today, ending in 5 days
+    const activeTour2 = {
+      status: "upcoming" as const,
+      arrivalDate: "2026-10-20",
+      departureDate: "2026-10-25",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(activeTour2, refToday), "active");
+
+    // Single-day tour today
+    const activeSingleDay = {
+      status: "upcoming" as const,
+      arrivalDate: "2026-10-20",
+      departureDate: "2026-10-20",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(activeSingleDay, refToday), "active");
+  });
+
+  test("Future tour whose arrival is after reference date displays as UPCOMING", () => {
+    // Tomorrow onwards
+    const futureTour1 = {
+      status: "active" as const, // Even if incorrectly stored
+      arrivalDate: "2026-10-22",
+      departureDate: "2026-10-24",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(futureTour1, refToday), "upcoming");
+
+    // Next month
+    const futureTour2 = {
+      arrivalDate: "2026-11-15",
+      departureDate: "2026-11-20",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(futureTour2, refToday), "upcoming");
+  });
+
+  test("Preserves genuine cancellations unconditionally regardless of date", () => {
+    // Past cancelled tour
+    const cancelledPast = {
+      status: "cancelled" as const,
+      arrivalDate: "2016-04-10",
+      departureDate: "2016-04-15",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(cancelledPast, refToday), "cancelled");
+
+    // Active dates but marked cancelled
+    const cancelledActive = {
+      status: "cancelled" as const,
+      arrivalDate: "2026-10-18",
+      departureDate: "2026-10-22",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(cancelledActive, refToday), "cancelled");
+
+    // Future dates but cancelled
+    const cancelledFuture = {
+      status: "cancelled" as const,
+      arrivalDate: "2026-12-01",
+      departureDate: "2026-12-08",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(cancelledFuture, refToday), "cancelled");
+
+    // Tour with cancelledAt timestamp set
+    const withCancelledAt = {
+      status: "upcoming" as const,
+      arrivalDate: "2026-11-01",
+      departureDate: "2026-11-05",
+      cancelledAt: "2026-10-15T10:00:00Z",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(withCancelledAt, refToday), "cancelled");
+  });
+
+  test("Preserves ATTENTION flag on active and upcoming tours, but marks past tours completed", () => {
+    // Active tour with attention
+    const activeAttention = {
+      status: "attention" as const,
+      arrivalDate: "2026-10-18",
+      departureDate: "2026-10-22",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(activeAttention, refToday), "attention");
+
+    // Upcoming tour with attention
+    const upcomingAttention = {
+      status: "attention" as const,
+      arrivalDate: "2026-11-01",
+      departureDate: "2026-11-05",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(upcomingAttention, refToday), "attention");
+
+    // Past tour with attention: concluded tour is completed
+    const pastAttention = {
+      status: "attention" as const,
+      arrivalDate: "2016-04-10",
+      departureDate: "2016-04-15",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(pastAttention, refToday), "completed");
+  });
+
+  test("Handles edge cases: inverted dates, missing arrival or departure date", () => {
+    // Inverted dates in past
+    const invertedPast = {
+      arrivalDate: "2016-04-20",
+      departureDate: "2016-04-10",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(invertedPast, refToday), "completed");
+
+    // Only arrival date provided
+    const onlyArrivalPast = {
+      arrivalDate: "2016-04-10",
+      departureDate: "",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(onlyArrivalPast, refToday), "completed");
+
+    const onlyArrivalFuture = {
+      arrivalDate: "2026-12-01",
+      departureDate: "",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(onlyArrivalFuture, refToday), "upcoming");
+
+    // No dates provided
+    const noDates = {
+      status: "attention" as const,
+      arrivalDate: "",
+      departureDate: "",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(noDates, refToday), "attention");
+  });
+
+  test("Handles leap-year boundaries correctly across past, present, and future", () => {
+    // Past leap year (2024-02-28 to 2024-02-29)
+    const leapPast = {
+      arrivalDate: "2024-02-28",
+      departureDate: "2024-02-29",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(leapPast, refToday), "completed");
+
+    // Future leap year (2028-02-29 to 2028-03-03) relative to 2026
+    const leapFuture = {
+      arrivalDate: "2028-02-29",
+      departureDate: "2028-03-03",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(leapFuture, refToday), "upcoming");
+
+    // Active on leap day: reference date 2028-02-29
+    const leapActive = {
+      arrivalDate: "2028-02-28",
+      departureDate: "2028-03-02",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(leapActive, "2028-02-29"), "active");
+  });
+
+  test("Respects Asia/Kolkata timezone reference date", () => {
+    // Reference date generated at 23:30 IST
+    const lateNightIndia = new Date("2026-10-20T18:00:00.000Z"); // 23:30 IST on Oct 20
+    const kolkataDate = getIndiaTodayISO(lateNightIndia);
+    assert.strictEqual(kolkataDate, "2026-10-20");
+
+    const activeToday = {
+      arrivalDate: "2026-10-18",
+      departureDate: "2026-10-20",
+    };
+    assert.strictEqual(computeTourLifecycleStatus(activeToday, kolkataDate), "active");
+
+    // Next morning at 00:30 IST on Oct 21
+    const nextDayIndia = new Date("2026-10-20T19:00:00.000Z"); // 00:30 IST on Oct 21
+    const kolkataNextDate = getIndiaTodayISO(nextDayIndia);
+    assert.strictEqual(kolkataNextDate, "2026-10-21");
+    // On Oct 21, the tour whose departure was Oct 20 is now completed!
+    assert.strictEqual(computeTourLifecycleStatus(activeToday, kolkataNextDate), "completed");
+  });
+});
+
 
 

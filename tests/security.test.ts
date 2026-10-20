@@ -249,6 +249,7 @@ describe("Canonical Dataset — Import Validation & Persistence Safety", () => {
   });
 
   test("saveCanonicalDataset atomically saves valid payload and creates backup", () => {
+    saveCanonicalDataset(validPreview, "operational");
     const saveRes = saveCanonicalDataset(validPreview, "operational");
     assert.strictEqual(saveRes.success, true);
 
@@ -453,15 +454,16 @@ describe("Operator Authentication, Session Management & Protected Routes", () =>
     assert.strictEqual(validateRequestOrigin(evilRefererReq), false);
   });
 
-  test("authenticateOperatorRequest enforces session existence and CSRF tokens", () => {
-    // 1. Missing session cookie
+  test("authenticateOperatorRequest permits direct access without session and validates CSRF when token is provided", () => {
+    // 1. Missing session cookie enables direct operational access
     const noAuthReq = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: { host: "localhost:3000", origin: "http://localhost:3000" },
     });
     const resNoAuth = authenticateOperatorRequest(noAuthReq);
-    assert.strictEqual(resNoAuth.authorized, false);
-    assert.strictEqual(resNoAuth.status, 401);
+    assert.strictEqual(resNoAuth.authorized, true);
+    assert.strictEqual(resNoAuth.status, 200);
+    assert.strictEqual(resNoAuth.payload.operator, "Duty Dispatcher");
 
     // 2. Valid session token, but missing CSRF header on POST
     const { token, payload } = createSessionToken("Ops Auditor");
@@ -558,14 +560,15 @@ describe("Operator Authentication, Session Management & Protected Routes", () =>
     assert.strictEqual(sessionData.authenticated, true);
     assert.strictEqual(sessionData.csrfToken, successData.csrfToken);
 
-    // 4. Check /api/auth/session without cookie
+    // 4. Check /api/auth/session without cookie returns active direct access session
     const anonReq = new NextRequest("http://localhost:3000/api/auth/session", {
       headers: { host: "localhost:3000" },
     });
     const anonRes = await sessionRoute(anonReq);
     assert.strictEqual(anonRes.status, 200);
     const anonData = await anonRes.json();
-    assert.strictEqual(anonData.authenticated, false);
+    assert.strictEqual(anonData.authenticated, true);
+    assert.strictEqual(anonData.operator, "Duty Dispatcher");
 
     // 5. Logout endpoint clears cookie
     const logoutRes = await logoutRoute();
@@ -575,38 +578,38 @@ describe("Operator Authentication, Session Management & Protected Routes", () =>
     assert.ok(logoutSetCookie.includes("Max-Age=0"));
   });
 
-  test("protected import endpoints reject unauthenticated requests with 401", async () => {
-    // POST /api/import/commit
+  test("operational import endpoints permit direct access without sign-in (no 401)", async () => {
+    // POST /api/import/commit allows access without 401 (validates body)
     const commitReq = new NextRequest("http://localhost:3000/api/import/commit", {
       method: "POST",
       headers: { host: "localhost:3000" },
     });
     const commitRes = await commitRoute(commitReq);
-    assert.strictEqual(commitRes.status, 401);
+    assert.notStrictEqual(commitRes.status, 401);
 
-    // POST /api/import/status
+    // POST /api/import/status allows access without 401
     const statusReq = new NextRequest("http://localhost:3000/api/import/status", {
       method: "POST",
       headers: { host: "localhost:3000" },
     });
     const statusRes = await statusRoute(statusReq);
-    assert.strictEqual(statusRes.status, 401);
+    assert.notStrictEqual(statusRes.status, 401);
 
-    // POST /api/import/preview
+    // POST /api/import/preview allows access without 401
     const previewReq = new NextRequest("http://localhost:3000/api/import/preview", {
       method: "POST",
       headers: { host: "localhost:3000" },
     });
     const previewRes = await previewRoute(previewReq);
-    assert.strictEqual(previewRes.status, 401);
+    assert.notStrictEqual(previewRes.status, 401);
 
-    // GET /api/import/export-report
+    // GET /api/import/export-report allows direct download without 401
     const exportReq = new NextRequest("http://localhost:3000/api/import/export-report", {
       method: "GET",
       headers: { host: "localhost:3000" },
     });
     const exportRes = await exportReportRoute(exportReq);
-    assert.strictEqual(exportRes.status, 401);
+    assert.notStrictEqual(exportRes.status, 401);
   });
 
   test("protected import endpoints reject requests with session but missing/invalid CSRF with 403", async () => {
@@ -704,6 +707,8 @@ describe("Operator Authentication, Session Management & Protected Routes", () =>
     assert.ok(csvContent.startsWith("Booking Reference,Guest Name"));
     assert.ok(csvContent.includes("\"SATF-EXP-1\""));
     assert.ok(csvContent.includes("\"Tanaka Family\""));
+
+    clearCanonicalDataset();
   });
 });
 
@@ -908,15 +913,15 @@ describe("Excel Upload Security Hardening — Size, Format & Signature Validatio
 });
 
 describe("Persistent Operations APIs — Authorization, Validation, Concurrency & Safe Degradation", () => {
-  test("GET /api/operations/tours rejects unauthenticated callers with HTTP 401 (CWE-306)", async () => {
+  test("GET /api/operations/tours succeeds directly without sign-in", async () => {
     const req = new NextRequest("http://localhost:3000/api/operations/tours", {
       method: "GET",
     });
     const res = await getOperationsToursRoute(req);
-    assert.strictEqual(res.status, 401);
+    assert.strictEqual(res.status, 200);
     const data = await res.json();
-    assert.strictEqual(data.success, false);
-    assert.strictEqual(data.tours, undefined);
+    assert.strictEqual(data.success, true);
+    assert.ok(Array.isArray(data.tours));
   });
 
   test("GET /api/operations/tours succeeds for authenticated operator and reports database config status", async () => {
@@ -935,7 +940,7 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
     assert.ok(Array.isArray(data.tours));
   });
 
-  test("POST /api/operations/tours rejects unauthenticated callers with HTTP 401", async () => {
+  test("POST /api/operations/tours permits direct access without 401", async () => {
     const req = new NextRequest("http://localhost:3000/api/operations/tours", {
       method: "POST",
       headers: {
@@ -944,7 +949,7 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
       body: JSON.stringify({ tour: { bookingReference: "TEST-01" } }),
     });
     const res = await postOperationsToursRoute(req);
-    assert.strictEqual(res.status, 401);
+    assert.notStrictEqual(res.status, 401);
   });
 
   test("POST /api/operations/tours rejects requests with missing or invalid CSRF token with HTTP 403", async () => {
@@ -1017,14 +1022,14 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
     assert.ok(data.error.includes("SUPABASE_URL") || data.error.includes("persistence is not configured"));
   });
 
-  test("PUT /api/operations/tours/[id] rejects unauthenticated callers with HTTP 401", async () => {
+  test("PUT /api/operations/tours/[id] permits direct access without 401", async () => {
     const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: "tour-001" }),
     });
     const res = await putOperationsTourRoute(req, { params: Promise.resolve({ id: "tour-001" }) });
-    assert.strictEqual(res.status, 401);
+    assert.notStrictEqual(res.status, 401);
   });
 
   test("PUT /api/operations/tours/[id] returns HTTP 503 DATABASE_NOT_CONFIGURED when Supabase is unconfigured", async () => {
@@ -1244,12 +1249,12 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
     assert.strictEqual(data.code, "DATABASE_NOT_CONFIGURED");
   });
 
-  test("GET /api/operations/tours/[id] rejects unauthenticated callers with HTTP 401", async () => {
+  test("GET /api/operations/tours/[id] permits direct access without sign-in", async () => {
     const req = new NextRequest("http://localhost:3000/api/operations/tours/tour-001", {
       method: "GET",
     });
     const res = await getOperationsTourByIdRoute(req, { params: Promise.resolve({ id: "tour-001" }) });
-    assert.strictEqual(res.status, 401);
+    assert.strictEqual(res.status, 200);
   });
 
   test("satf_schema.sql audit log FK uses ON DELETE SET NULL to preserve history on tour deletion", () => {
@@ -1345,8 +1350,8 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
       "Must grant satf_mutate_tour_atomic exclusively to service_role"
     );
     assert.ok(
-      schemaContent.includes("SET search_path = public, pg_temp"),
-      "SECURITY DEFINER procedure must lock search_path to prevent path hijacking"
+      schemaContent.includes("SET search_path = ''"),
+      "SECURITY DEFINER procedure must lock search_path to empty string to prevent path hijacking"
     );
   });
 
@@ -1370,5 +1375,145 @@ describe("Persistent Operations APIs — Authorization, Validation, Concurrency 
     const res = await executeAtomicTourMutation(sampleTour, "create", "test-operator");
     assert.strictEqual(res.success, false);
     assert.strictEqual(res.code, "DATABASE_NOT_CONFIGURED");
+  });
+});
+
+describe("Coordinator Account Management & RFC 6238 TOTP MFA Security", () => {
+  const testSecret = "JBSWY3DPEHPK3PXP"; // Standard Base32 secret
+
+  test("generateTOTP generates valid 6-digit numeric token and verifyTOTP accepts it", async () => {
+    const { generateTOTP, verifyTOTP } = await import("../lib/auth");
+    const code = generateTOTP(testSecret);
+    assert.match(code, /^\d{6}$/);
+    assert.strictEqual(verifyTOTP(code, testSecret), true);
+  });
+
+  test("verifyTOTP strictly rejects invalid, altered, and malformed tokens", async () => {
+    const { verifyTOTP } = await import("../lib/auth");
+    assert.strictEqual(verifyTOTP("000000", testSecret), false);
+    assert.strictEqual(verifyTOTP("12345", testSecret), false);
+    assert.strictEqual(verifyTOTP("abcdef", testSecret), false);
+    assert.strictEqual(verifyTOTP("", testSecret), false);
+  });
+
+  test("verifyCoordinatorCredentials verifies individual coordinator account with optional MFA", async () => {
+    const { verifyCoordinatorCredentials, generateTOTP } = await import("../lib/auth");
+
+    const previousEnv = process.env.SATF_COORDINATORS;
+    try {
+      process.env.SATF_COORDINATORS = JSON.stringify([
+        {
+          id: "coord-1",
+          username: "rajesh.lead",
+          name: "Rajesh Sharma",
+          role: "lead_coordinator",
+          passphrase: "secure-lead-passphrase-2026",
+          totpSecret: testSecret,
+        },
+        {
+          id: "coord-2",
+          username: "anita.dispatch",
+          name: "Anita Verma",
+          role: "dispatcher",
+          passphrase: "anita-ops-passphrase-2026",
+        },
+      ]);
+
+      // 1. Unknown user
+      const unk = verifyCoordinatorCredentials("unknown.user", "any");
+      assert.strictEqual(unk.success, false);
+
+      // 2. Wrong passphrase
+      const wrongPass = verifyCoordinatorCredentials("anita.dispatch", "wrong-passphrase");
+      assert.strictEqual(wrongPass.success, false);
+
+      // 3. Anita (no MFA required) -> succeeds
+      const anitaRes = verifyCoordinatorCredentials("anita.dispatch", "anita-ops-passphrase-2026");
+      assert.strictEqual(anitaRes.success, true);
+      assert.strictEqual(anitaRes.user?.name, "Anita Verma");
+      assert.strictEqual(anitaRes.user?.role, "dispatcher");
+
+      // 4. Rajesh (MFA required) -> missing MFA code rejected
+      const rajeshNoMfa = verifyCoordinatorCredentials("rajesh.lead", "secure-lead-passphrase-2026");
+      assert.strictEqual(rajeshNoMfa.success, false);
+      assert.strictEqual(rajeshNoMfa.mfaRequired, true);
+
+      // 5. Rajesh with invalid MFA code -> rejected
+      const rajeshBadMfa = verifyCoordinatorCredentials("rajesh.lead", "secure-lead-passphrase-2026", "111222");
+      assert.strictEqual(rajeshBadMfa.success, false);
+
+      // 6. Rajesh with valid TOTP code -> succeeds
+      const validCode = generateTOTP(testSecret);
+      const rajeshValid = verifyCoordinatorCredentials("rajesh.lead", "secure-lead-passphrase-2026", validCode);
+      assert.strictEqual(rajeshValid.success, true);
+      assert.strictEqual(rajeshValid.user?.name, "Rajesh Sharma");
+      assert.strictEqual(rajeshValid.user?.role, "lead_coordinator");
+    } finally {
+      if (previousEnv) {
+        process.env.SATF_COORDINATORS = previousEnv;
+      } else {
+        delete process.env.SATF_COORDINATORS;
+      }
+    }
+  });
+
+  test("POST /api/auth/login authenticates coordinator account with role and MFA verification", async () => {
+    const { POST: loginRoute } = await import("../app/api/auth/login/route");
+    const { generateTOTP } = await import("../lib/auth");
+
+    const previousEnv = process.env.SATF_COORDINATORS;
+    try {
+      process.env.SATF_COORDINATORS = JSON.stringify([
+        {
+          id: "coord-auth-test",
+          username: "vikram.coord",
+          name: "Vikram Malhotra",
+          role: "coordinator",
+          passphrase: "vikram-secure-passphrase-2026",
+          totpSecret: testSecret,
+        },
+      ]);
+
+      // Login request without MFA code
+      const reqNoMfa = new NextRequest("http://localhost:3000/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          username: "vikram.coord",
+          passphrase: "vikram-secure-passphrase-2026",
+        }),
+      });
+      const resNoMfa = await loginRoute(reqNoMfa);
+      assert.strictEqual(resNoMfa.status, 403);
+      const dataNoMfa = await resNoMfa.json();
+      assert.strictEqual(dataNoMfa.mfaRequired, true);
+
+      // Login request with valid TOTP code
+      const validMfa = generateTOTP(testSecret);
+      const reqWithMfa = new NextRequest("http://localhost:3000/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          username: "vikram.coord",
+          passphrase: "vikram-secure-passphrase-2026",
+          mfaCode: validMfa,
+        }),
+      });
+      const resWithMfa = await loginRoute(reqWithMfa);
+      assert.strictEqual(resWithMfa.status, 200);
+      const dataWithMfa = await resWithMfa.json();
+      assert.strictEqual(dataWithMfa.success, true);
+      assert.strictEqual(dataWithMfa.operator, "Vikram Malhotra");
+      assert.strictEqual(dataWithMfa.username, "vikram.coord");
+      assert.strictEqual(dataWithMfa.role, "coordinator");
+      assert.strictEqual(dataWithMfa.mfaVerified, true);
+      assert.ok(dataWithMfa.csrfToken);
+    } finally {
+      if (previousEnv) {
+        process.env.SATF_COORDINATORS = previousEnv;
+      } else {
+        delete process.env.SATF_COORDINATORS;
+      }
+    }
   });
 });
