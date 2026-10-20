@@ -694,7 +694,7 @@ export function extractTrainJourneys(
 
 /**
  * Parse an Excel workbook Buffer or XLSX object into strongly-typed SATF Tour records.
- * Follows all Phase 24 Approved Business Decisions:
+ * Follows all  approved business rules:
  * 1. Scope: Supports all operational records from 2016-2026 without silent discard.
  * 2. Date ambiguity: Automatically corrects dates only through documented deterministic rules;
  *    unresolved cases are flagged for review and never guessed.
