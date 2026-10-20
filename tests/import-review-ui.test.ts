@@ -337,8 +337,8 @@ describe("Excel Import Review UI — Filtering, Ambiguity & Privacy Tests", () =
   });
 });
 
-describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling", () => {
-  // Test suite covering the 5 Phase 30 requirements
+describe(" — Commit Safeguards, Idempotency & Partial Failure Handling", () => {
+  // Test suite covering the 5  requirements
   const sampleAmbiguousResult: ImportPreviewResult = {
     success: true,
     summary: {
@@ -678,7 +678,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.strictEqual(comparison.wouldInsertCount, 0);
   });
 
-  test("Phase 32 (A): Commit accepts valid 'override' decision and applies custom date", async () => {
+  test(" (A): Commit accepts valid 'override' decision and applies custom date", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
     const { token, payload } = createSessionToken("Lead Coordinator");
@@ -713,7 +713,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.strictEqual(data.dryRun, true);
   });
 
-  test("Phase 32 (B): Commit rejects duplicate decisions matching the same record with HTTP 422 DUPLICATE_DATE_DECISIONS", async () => {
+  test(" (B): Commit rejects duplicate decisions matching the same record with HTTP 422 DUPLICATE_DATE_DECISIONS", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
     const { token, payload } = createSessionToken("Lead Coordinator");
@@ -754,7 +754,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.match(data.error, /Duplicate date decision received/);
   });
 
-  test("Phase 32 (C): Commit rejects stale decisions pointing to non-existent source records with HTTP 422 STALE_DATE_DECISION", async () => {
+  test(" (C): Commit rejects stale decisions pointing to non-existent source records with HTTP 422 STALE_DATE_DECISION", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
     const { token, payload } = createSessionToken("Lead Coordinator");
@@ -789,7 +789,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.match(data.error, /Stale date decision/);
   });
 
-  test("Phase 32 (D): Commit rejects invalid calendar dates (e.g. 2023-02-31, 2026-13-45) with HTTP 422 INVALID_CALENDAR_DATE", async () => {
+  test(" (D): Commit rejects invalid calendar dates (e.g. 2023-02-31, 2026-13-45) with HTTP 422 INVALID_CALENDAR_DATE", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
     const { token, payload } = createSessionToken("Lead Coordinator");
@@ -824,7 +824,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.match(data.error, /Invalid calendar date/);
   });
 
-  test("Phase 32 (E): Repeated booking references preserve distinct date decisions keyed by sourceRecordId", async () => {
+  test(" (E): Repeated booking references preserve distinct date decisions keyed by sourceRecordId", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
 
     // Two ambiguous tours sharing booking reference "33940" but with distinct sourceRecordIds
@@ -938,7 +938,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.strictEqual(data.summary.totalIncoming, 2);
   });
 
-  test("Phase 32 (F): Decision sheet CSV generator outputs sanitized rows with blank confirmation fields", async () => {
+  test(" (F): Decision sheet CSV generator outputs sanitized rows with blank confirmation fields", async () => {
     const { generateDecisionSheetCsv } = await import("../app/api/import/decision-sheet/route");
 
     const sampleAmbiguities = [
@@ -989,10 +989,10 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
   });
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Phase 33: Persistent Decisions & Truthful Empty State Verification
+  // : Persistent Decisions & Truthful Empty State Verification
   // ──────────────────────────────────────────────────────────────────────────
 
-  test("Phase 33 (1): GET /api/import/decisions rejects unauthenticated access with 401", async () => {
+  test(" (1): GET /api/import/decisions rejects unauthenticated access with 401", async () => {
     const { GET } = await import("../app/api/import/decisions/route");
     const unauthReq = new NextRequest("http://localhost:3000/api/import/decisions", { method: "GET" });
     const unauthRes = await GET(unauthReq);
@@ -1010,7 +1010,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.strictEqual(authRes.status, 200);
   });
 
-  test("Phase 33 (2): POST /api/import/decisions requires CSRF protection (HTTP 403)", async () => {
+  test(" (2): POST /api/import/decisions requires CSRF protection (HTTP 403)", async () => {
     const { POST } = await import("../app/api/import/decisions/route");
     const session = createSessionToken("TestCoordinator");
     const req = new NextRequest("http://localhost:3000/api/import/decisions", {
@@ -1028,7 +1028,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.strictEqual(res.status, 403);
   });
 
-  test("Phase 33 (3): POST /api/import/decisions rejects invalid date formats (HTTP 400)", async () => {
+  test(" (3): POST /api/import/decisions rejects invalid date formats (HTTP 400)", async () => {
     const { POST } = await import("../app/api/import/decisions/route");
     const session = createSessionToken("TestCoordinator", { role: "lead_coordinator" });
     const req = new NextRequest("http://localhost:3000/api/import/decisions", {
@@ -1056,7 +1056,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.ok(data.error.includes("invalid confirmedArrivalDate"));
   });
 
-  test("Phase 33 (4): POST/GET/DELETE decisions round-trip persists and clears properly", async () => {
+  test(" (4): POST/GET/DELETE decisions round-trip persists and clears properly", async () => {
     const { GET, POST, DELETE } = await import("../app/api/import/decisions/route");
     const session = createSessionToken("TestCoordinator", { role: "lead_coordinator" });
     const authHeaders = {
@@ -1151,7 +1151,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     assert.deepStrictEqual(emptyData.decisions, []);
   });
 
-  test("Phase 34 (1): Live commit blocks simulated/test-generated decisions (HTTP 422)", async () => {
+  test(" (1): Live commit blocks simulated/test-generated decisions (HTTP 422)", async () => {
     const { POST } = await import("../app/api/import/commit/route");
     const session = createSessionToken("TestCoordinator", { role: "lead_coordinator" });
     const authHeaders = {
@@ -1192,7 +1192,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
     );
   });
 
-  test("Phase 33 (5): getEffectiveServerTours returns [] when Supabase is configured and has 0 rows", async () => {
+  test(" (5): getEffectiveServerTours returns [] when Supabase is configured and has 0 rows", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
     const envPath = path.resolve(process.cwd(), ".env.local");
@@ -1228,7 +1228,7 @@ describe("Phase 30 — Commit Safeguards, Idempotency & Partial Failure Handling
   });
 });
 
-describe("Phase 37 — Final Import Operator Readiness & Safety Controls", () => {
+describe(" — Final Import Operator Readiness & Safety Controls", () => {
   test("Live import path strictly rejects simulated decisions (Safeguard 4.5)", async () => {
     const { POST: commitRoute } = await import("../app/api/import/commit/route");
     const { token, payload } = createSessionToken("Lead Coordinator", { role: "lead_coordinator" });
