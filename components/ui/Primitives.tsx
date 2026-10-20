@@ -329,14 +329,14 @@ export function PageContainer({
 export interface PlaceholderPageProps {
   title: string;
   description: string;
-  plannedPhase?: string;
+  plannedLabel?: string;
   icon: React.ElementType;
 }
 
 export function PlaceholderPage({
   title,
   description,
-  plannedPhase = "Phase 2",
+  plannedLabel = "Planned",
   icon: Icon,
 }: PlaceholderPageProps) {
   return (
@@ -357,7 +357,7 @@ export function PlaceholderPage({
           <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-              Roadmap: {plannedPhase}
+              Roadmap: {plannedLabel}
             </span>
             <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-amber-50 text-amber-800 text-xs font-medium border border-amber-200">
               Prototype placeholder
