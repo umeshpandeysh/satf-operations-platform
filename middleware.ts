@@ -22,9 +22,25 @@ function isDevBypassActive(): boolean {
   return process.env.SATF_DEV_AUTH_BYPASS === "true";
 }
 
+export function isPublicDemoModeActive(): boolean {
+  if (process.env.SATF_PUBLIC_DEMO_MODE !== "true") {
+    return false;
+  }
+  // Safety check: Cannot be active if production database credentials are present
+  // to ensure real passenger/operational records are never exposed without gateway authentication.
+  if (process.env.SUPABASE_URL || process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error(
+      "SECURITY VIOLATION: SATF_PUBLIC_DEMO_MODE cannot be enabled when database credentials are present. Failing closed."
+    );
+    return false;
+  }
+  return true;
+}
+
 export async function middleware(req: NextRequest) {
   const host = req.headers.get("host") || "";
   const pathname = req.nextUrl.pathname;
+  const isDemo = isPublicDemoModeActive();
 
   // 1. Strip any client-supplied internal verification headers to prevent spoofing
   const requestHeaders = new Headers(req.headers);
@@ -42,13 +58,50 @@ export async function middleware(req: NextRequest) {
     });
   }
 
-  // 3. Direct Vercel Origin Protection:
-  // Reject direct requests to *.vercel.app unless arriving with valid gateway credentials
+  // 3. Extract gateway token if provided
   const token =
     req.headers.get("cf-access-jwt-assertion") ||
     req.cookies.get("CF_Authorization")?.value;
 
-  if (host.endsWith(".vercel.app") && !token) {
+  // 4. Public Demo Mode Boundary:
+  if (isDemo) {
+    // A. All mutating operations (POST, PUT, DELETE, PATCH) on ANY /api route MUST require authentication
+    if (pathname.startsWith("/api/")) {
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        if (!token) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "Forbidden: Mutation operations are disabled in demo mode and require authorized SATF credentials.",
+            },
+            { status: 403 }
+          );
+        }
+      }
+
+      // B. Sensitive import and administrative APIs strictly require authentication even in demo mode
+      if (pathname.startsWith("/api/import/") && !token) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Unauthorized: Import operations require authorized SATF credentials.",
+          },
+          { status: 401 }
+        );
+      }
+    }
+
+    // C. Public HTML UI pages and safe read-only demo assets pass through without gateway token
+    if (!token) {
+      return NextResponse.next({
+        request: { headers: requestHeaders },
+      });
+    }
+  }
+
+  // 5. Direct Vercel Origin Protection (when not in public demo mode):
+  // Reject direct requests to *.vercel.app unless arriving with valid gateway credentials
+  if (!isDemo && host.endsWith(".vercel.app") && !token) {
     return NextResponse.json(
       {
         success: false,

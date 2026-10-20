@@ -12,7 +12,7 @@ import {
   authenticateOperatorRequest,
   isDevelopmentBypassActive,
 } from "../lib/auth";
-import { middleware } from "../middleware";
+import { middleware, isPublicDemoModeActive } from "../middleware";
 import { POST as cancelTourRoute, GET as getTourByIdRoute } from "../app/api/operations/tours/[id]/route";
 import { POST as commitImportRoute } from "../app/api/import/commit/route";
 import { POST as importStatusRoute, GET as getImportStatusRoute } from "../app/api/import/status/route";
@@ -549,3 +549,98 @@ describe("SATF Phase 3: Zero-Trust Perimeter & Role-Based Authorization", () => 
     assert.strictEqual(res.identity?.email, STANDARD_EMAIL);
   });
 });
+
+describe("SATF Public Demo Mode Boundary & Zero-Trust Invariants", () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.SATF_PUBLIC_DEMO_MODE;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  test("isPublicDemoModeActive is FALSE by default", () => {
+    assert.strictEqual(isPublicDemoModeActive(), false);
+  });
+
+  test("isPublicDemoModeActive fails closed when database credentials are present", () => {
+    process.env.SATF_PUBLIC_DEMO_MODE = "true";
+    process.env.SUPABASE_URL = "https://prod-project.supabase.co";
+    assert.strictEqual(isPublicDemoModeActive(), false);
+
+    delete process.env.SUPABASE_URL;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key-mock";
+    assert.strictEqual(isPublicDemoModeActive(), false);
+  });
+
+  test("isPublicDemoModeActive is TRUE only when SATF_PUBLIC_DEMO_MODE is 'true' without database credentials", () => {
+    process.env.SATF_PUBLIC_DEMO_MODE = "true";
+    assert.strictEqual(isPublicDemoModeActive(), true);
+  });
+
+  test("demo mode permits public HTML page navigation (/, /tours, /calendar)", async () => {
+    process.env.SATF_PUBLIC_DEMO_MODE = "true";
+
+    const reqHome = new NextRequest("https://satf-operations-platform.vercel.app/", {
+      headers: { host: "satf-operations-platform.vercel.app" },
+    });
+    const resHome = await middleware(reqHome);
+    assert.strictEqual(resHome.status, 200);
+
+    const reqTours = new NextRequest("https://satf-operations-platform.vercel.app/tours", {
+      headers: { host: "satf-operations-platform.vercel.app" },
+    });
+    const resTours = await middleware(reqTours);
+    assert.strictEqual(resTours.status, 200);
+  });
+
+  test("demo mode BLOCKS mutating API requests without token (POST /api/operations/tours -> 403)", async () => {
+    process.env.SATF_PUBLIC_DEMO_MODE = "true";
+
+    const reqMutate = new NextRequest("https://satf-operations-platform.vercel.app/api/operations/tours", {
+      method: "POST",
+      headers: {
+        host: "satf-operations-platform.vercel.app",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ tourName: "Unauthorized mutation" }),
+    });
+
+    const resMutate = await middleware(reqMutate);
+    assert.strictEqual(resMutate.status, 403);
+    const body = await resMutate.json();
+    assert.ok(body.error?.includes("Mutation operations are disabled in demo mode"));
+  });
+
+  test("demo mode BLOCKS import API requests without token (GET /api/import/status -> 401)", async () => {
+    process.env.SATF_PUBLIC_DEMO_MODE = "true";
+
+    const reqImport = new NextRequest("https://satf-operations-platform.vercel.app/api/import/status", {
+      method: "GET",
+      headers: { host: "satf-operations-platform.vercel.app" },
+    });
+
+    const resImport = await middleware(reqImport);
+    assert.strictEqual(resImport.status, 401);
+    const body = await resImport.json();
+    assert.ok(body.error?.includes("Import operations require authorized SATF credentials"));
+  });
+
+  test("when demo mode is disabled, direct vercel.app access without token is blocked with 403", async () => {
+    delete process.env.SATF_PUBLIC_DEMO_MODE;
+
+    const reqVercelDirect = new NextRequest("https://satf-operations-platform.vercel.app/", {
+      headers: { host: "satf-operations-platform.vercel.app" },
+    });
+
+    const resVercelDirect = await middleware(reqVercelDirect);
+    assert.strictEqual(resVercelDirect.status, 403);
+    const body = await resVercelDirect.json();
+    assert.ok(body.error?.includes("Direct access via vercel.app origin is prohibited"));
+  });
+});
+

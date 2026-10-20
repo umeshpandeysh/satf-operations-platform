@@ -46,3 +46,6 @@ next-env.d.ts
 *.xls
 *.xlsx
 /scratch/
+
+.vercel
+.env*
