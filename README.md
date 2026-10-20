@@ -1,4 +1,16 @@
-# SATF Operations Platform
+# 🧭 SATF Operations Platform
+
+<p align="center">
+  <img src="public/brand/satf-logo.png" alt="SATF logo" width="180" />
+</p>
+
+<p align="center">
+  <strong>Bilingual travel operations · Tour coordination · Resource planning · Operational reporting</strong>
+</p>
+
+<p align="center">
+  <a href="https://satf-operations-platform.vercel.app">🌐 Live application</a> · <a href="https://github.com/umeshpandeysh/satf-operations-platform">📦 Source repository</a> · <a href="https://stworld.jp/">✈️ ST WORLD</a>
+</p>
 
 A bilingual operations workspace for South Asia Travel Factory Private Limited (SATF), supporting the coordination of India-side ground arrangements for Japanese travellers whose tours are organized through [ST WORLD](https://stworld.jp/).
 
@@ -10,7 +22,21 @@ The application brings tour records, itineraries, flight and hotel details, reso
 
 > **Operational data:** Persistent operations use Supabase. A local installation without the required server-side database configuration cannot save changes to the live database. Use synthetic data for development and demonstrations.
 
-## Contents
+## ✨ At a glance
+
+| Capability | Implementation |
+|---|---|
+| Web framework | Next.js App Router 16.4.x |
+| UI runtime | React 19.3.x + TypeScript 5.x |
+| Styling | Tailwind CSS 4.x |
+| Data store | Supabase / PostgreSQL |
+| Workbook support | SheetJS (`xlsx`) |
+| Identity boundary | Server-side session and request authorization; Cloudflare Access JWT verification is also implemented |
+| Language | English 🇬🇧 and Japanese 🇯🇵 |
+| Deployment target | Vercel |
+| Automated checks | Node test runner via `tsx`, ESLint, TypeScript, Next.js build |
+
+## 📚 Contents
 
 - [Overview](#overview)
 - [Features](#features)
@@ -25,13 +51,13 @@ The application brings tour records, itineraries, flight and hotel details, reso
 - [Security and data handling](#security-and-data-handling)
 - [Operational notes](#operational-notes)
 
-## Overview
+## 🧩 Overview
 
 SATF coordinates ground operations for inbound travel in India. Staff need a consistent view of guest groups, travel dates, transport, hotels, guides, drivers, itinerary details, and outstanding requests. This application keeps those details connected to their booking records and supports day-to-day coordination.
 
 The repository contains a Next.js web application, reusable interface components, shared operational rules, API routes, Supabase persistence and schema files, workbook parsing and reconciliation logic, and automated tests.
 
-## Features
+## 🚀 Features
 
 ### Operations dashboard
 - Summary metrics for arrivals, departures, active tours, and records needing attention.
@@ -90,7 +116,36 @@ The source workbook used during development is named NEW CHART 2025-2026 (1).xls
 - Settings and data-management controls, including workbook import tools.
 - SATF brand assets and application icons.
 
-## Application routes
+## 🗺️ Application routes
+
+### Tour operations lifecycle
+
+~~~mermaid
+flowchart TD
+    A[Open dashboard] --> B[Search or select tour]
+    B --> C[Review itinerary, flights and hotels]
+    C --> D[Check guide, driver and vehicle assignments]
+    D --> E{Issue or missing detail?}
+    E -- Yes --> F[Record or update issue]
+    E -- No --> G[Confirm operational readiness]
+    F --> G
+    G --> H[Review calendar and reports]
+~~~
+
+### Workbook import and reconciliation
+
+~~~mermaid
+flowchart TD
+    A[Select source workbook] --> B[Parse and validate rows]
+    B --> C[Preview and compare records]
+    C --> D{Needs a decision?}
+    D -- Yes --> E[Record reconciliation decision]
+    D -- No --> F[Prepare reviewed changes]
+    E --> F
+    F --> G[Authorized commit request]
+    G --> H[Persist changes and audit record]
+    H --> I[Review import report]
+~~~
 
 | Route | Purpose |
 | --- | --- |
@@ -105,7 +160,25 @@ The source workbook used during development is named NEW CHART 2025-2026 (1).xls
 
 The API is organized under /api and includes authentication/session endpoints, operational tour endpoints, issue endpoints, and import/reconciliation endpoints.
 
-## Technology
+## 🛠️ Technology
+
+### Architecture at a glance
+
+~~~mermaid
+flowchart LR
+    U[Staff browser] --> W[Next.js UI]
+    W --> API[Next.js API routes]
+    API --> AUTH[Session and authorization checks]
+    AUTH --> OPS[Operational business logic]
+    OPS --> DB[(Supabase PostgreSQL)]
+    OPS --> AUD[(Audit log)]
+    UIX[Excel workbook] --> PARSE[Workbook parser and reconciliation]
+    PARSE --> API
+    EMAIL[Optional M365 / Google mailbox] -. configured integration .-> ISSUES[Issue mapping]
+    ISSUES --> API
+~~~
+
+The application separates presentation, API handlers, operational rules, and database persistence. Browser components call server routes; privileged database access belongs on the server. Workbook imports follow a review/decision/commit workflow rather than being treated as a simple file upload.
 
 | Area | Technology |
 | --- | --- |
@@ -119,7 +192,9 @@ The API is organized under /api and includes authentication/session endpoints, o
 | Tests | Node.js test runner through tsx |
 | Hosting | [Vercel](https://vercel.com/) |
 
-## Repository layout
+## 🗂️ Repository layout
+
+The tree below highlights the main maintained areas. The repository also includes route-specific handlers, shared UI components, icons, SQL definitions, and individual test files.
 
 ~~~text
 .
@@ -177,7 +252,7 @@ The API is organized under /api and includes authentication/session endpoints, o
 └── tsconfig.json                 # TypeScript configuration
 ~~~
 
-## Requirements
+## 📋 Requirements
 
 - Node.js compatible with the installed Next.js version; Node.js 20 or newer is recommended.
 - npm.
@@ -187,7 +262,7 @@ The API is organized under /api and includes authentication/session endpoints, o
 
 See the [Next.js installation guide](https://nextjs.org/docs/app/getting-started/installation) for current runtime requirements.
 
-## Run locally
+## 💻 Run locally
 
 ### 1. Clone the repository
 
@@ -235,7 +310,7 @@ npm run build
 npm run start
 ~~~
 
-## Environment configuration
+## 🔐 Environment configuration
 
 The complete variable list and comments are maintained in [.env.example](.env.example). Common settings include:
 
@@ -256,7 +331,7 @@ Configure only the variables required by the authentication and integration path
 
 Never expose server secrets through client-side variables. Never paste real credentials into issues, pull requests, chat messages, or documentation. Rotate any credential that has been exposed.
 
-## Database setup
+## 🗄️ Database setup
 
 The SQL files under supabase/ define database structures and database-side operations used by the application.
 
@@ -268,7 +343,23 @@ The SQL files under supabase/ define database structures and database-side opera
 
 The application uses the satf_operational_tours table for tour records and satf_audit_log for audit entries. The server-side persistence layer maps between the application tour model and PostgreSQL records and records operational changes. Do not run schema or import scripts against a live database without reviewing their effects and obtaining approval.
 
-## Testing and validation
+## 🧪 Testing and validation
+
+### What the test suites cover
+
+| Test area | Focus |
+|---|---|
+| `operations.test.ts` | Tour rules, validation, status, assignments, and operational workflows |
+| `parser.test.ts` | Workbook parsing, dates, field mapping, and provenance |
+| `security.test.ts` | Authentication, authorization, input and security invariants |
+| `perimeter-auth.test.ts` | Protected API behavior and request boundary checks |
+| `import-review-ui.test.ts` | Import review and commit safeguards |
+| `import-failure-recovery.test.ts` | Import recovery, idempotency, and partial-failure handling |
+| `i18n.test.ts` | Translation dictionary and localization behavior |
+| `email-issues.test.ts` | Mailbox integration behavior, sanitization, and error handling |
+| `persistence-e2e.test.ts` | Database-backed persistence integration |
+
+
 
 Run the available checks from the repository root:
 
@@ -288,7 +379,7 @@ npm run build
 
 Tests that require configured services or credentials may need an isolated test environment. Do not point destructive tests at the live operational database.
 
-## Security and data handling
+## 🛡️ Security and data handling
 
 This application may process passenger names, booking details, travel dates, flight information, hotel arrangements, contact messages, and staff assignments.
 
@@ -302,7 +393,7 @@ This application may process passenger names, booking details, travel dates, fli
 - Do not publish operational records, credentials, private passenger details, or production logs in this repository.
 - Review every database migration and import commit before running it against live data.
 
-## Operational notes
+## ℹ️ Operational notes
 
 - The dashboard's date-sensitive metrics use the India calendar date.
 - Sample inquiry records are for demonstration and are not proof of a live mailbox connection.
