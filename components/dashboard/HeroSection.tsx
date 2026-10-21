@@ -24,11 +24,31 @@ export function HeroSection({ toursCount = 1757 }: HeroSectionProps) {
   const { t, language } = useLanguage();
 
   return (
-    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#dcecf7]/50 via-white to-slate-50/80 border border-slate-200/80 shadow-2xs p-6 sm:p-8 lg:p-10 transition-all">
+    <div className="relative overflow-hidden rounded-2xl border border-sky-300/60 shadow-xs p-6 sm:p-8 lg:p-10 transition-all">
       
+      {/* High-Definition Japanese Mountain Landscape Hero Artwork */}
+      <div
+        className="absolute inset-0 pointer-events-none overflow-hidden select-none"
+        aria-hidden="true"
+      >
+        {/* Serene Mount Fuji, Pagoda & Sakura Watercolor Artwork */}
+        <div
+          className="absolute inset-0 bg-[url('/backgrounds/japanese-mountain-hero.webp')] bg-cover bg-[position:center_25%] sm:bg-[position:center_20%] lg:bg-[position:center_15%] bg-no-repeat opacity-95 transition-opacity"
+        />
+
+        {/* Restrained local gradient strictly behind left text to guarantee WCAG AAA readability while keeping Mount Fuji & Pagoda completely unobstructed */}
+        <div
+          className="absolute inset-y-0 left-0 w-full lg:w-7/12 bg-gradient-to-r from-white/95 via-white/80 to-transparent pointer-events-none"
+        />
+        {/* Soft bottom edge blend */}
+        <div
+          className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white/50 to-transparent pointer-events-none"
+        />
+      </div>
+
       {/* Route-line & Destination Connection SVG Motif */}
       <svg
-        className="absolute top-0 right-0 w-full h-full max-w-xl opacity-30 pointer-events-none hidden md:block"
+        className="absolute top-0 right-0 w-full h-full max-w-xl opacity-25 pointer-events-none hidden md:block"
         viewBox="0 0 600 400"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
@@ -151,7 +171,7 @@ export function HeroSection({ toursCount = 1757 }: HeroSectionProps) {
           <div className="relative mx-auto max-w-sm lg:max-w-none space-y-3.5">
             
             {/* Primary Front Card: Active Circuit Dispatch */}
-            <div className="rounded-xl bg-white border border-slate-200/85 shadow-2xs p-4 sm:p-5 space-y-3.5 transition-transform duration-200 hover:-translate-y-0.5">
+            <div className="rounded-xl bg-white/85 backdrop-blur-md border border-white/90 shadow-sm p-4 sm:p-5 space-y-3.5 transition-transform duration-200 hover:-translate-y-0.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Activity size={16} className="text-[#244d70]" />
@@ -166,7 +186,7 @@ export function HeroSection({ toursCount = 1757 }: HeroSectionProps) {
 
               {/* Circuit Route Tags */}
               <div className="space-y-2">
-                <div className="p-3 rounded-lg bg-slate-50/80 border border-slate-200/70 space-y-1.5">
+                <div className="p-3 rounded-lg bg-white/70 backdrop-blur-xs border border-white/80 space-y-1.5">
                   <div className="flex items-center justify-between text-xs font-semibold text-[#172d43]">
                     <span className="flex items-center gap-1">
                       <MapPin size={13} className="text-[#244d70]" />
@@ -181,7 +201,7 @@ export function HeroSection({ toursCount = 1757 }: HeroSectionProps) {
                   </p>
                 </div>
 
-                <div className="p-3 rounded-lg bg-slate-50/80 border border-slate-200/70 space-y-1.5">
+                <div className="p-3 rounded-lg bg-white/70 backdrop-blur-xs border border-white/80 space-y-1.5">
                   <div className="flex items-center justify-between text-xs font-semibold text-[#172d43]">
                     <span className="flex items-center gap-1">
                       <MapPin size={13} className="text-[#244d70]" />
@@ -205,7 +225,7 @@ export function HeroSection({ toursCount = 1757 }: HeroSectionProps) {
             </div>
 
             {/* Secondary Mid-layer Card: Company & Association (Clean Light Surface) */}
-            <div className="rounded-xl bg-white text-slate-800 p-4 shadow-2xs border border-slate-200/85 flex items-center justify-between">
+            <div className="rounded-xl bg-white/85 backdrop-blur-md text-slate-800 p-4 shadow-sm border border-white/90 flex items-center justify-between">
               <div className="space-y-0.5">
                 <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">
                   {language === "ja" ? "現地運営法人" : "Operating Organization"}

@@ -28,14 +28,31 @@ function TopNavBarFallback() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50/70 text-slate-900">
+    <div className="min-h-screen flex flex-col relative bg-[#f8fbfe] text-slate-900 selection:bg-[#dcecf7] selection:text-[#172d43]">
+      {/* Visible Japanese travel-culture atmospheric background layer */}
+      <div
+        className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none print:hidden"
+        aria-hidden="true"
+      >
+        {/* Serene Japanese mountain, pagoda and sakura landscape */}
+        <div
+          className="absolute inset-0 bg-[url('/backgrounds/japanese-travel-atmosphere.webp')] bg-top bg-no-repeat bg-cover opacity-30 transition-opacity"
+        />
+        {/* Soft bottom edge blend to keep long scrolling pages clean */}
+        <div
+          className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#f8fbfe]/50 pointer-events-none"
+        />
+      </div>
+
       <Suspense fallback={<TopNavBarFallback />}>
         <TopNavBar />
       </Suspense>
-      <main className="flex-1 w-full focus:outline-none">
+      <main className="flex-1 w-full relative z-10 focus:outline-none">
         {children}
       </main>
-      <Footer />
+      <div className="relative z-10">
+        <Footer />
+      </div>
     </div>
   );
 }

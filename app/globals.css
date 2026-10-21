@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7fafc;
+  --background: #f8fbfe;
   --foreground: #0f172a;
   --surface-card: #ffffff;
   --surface-soft: #dcecf7;
@@ -14,7 +14,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-satf-bg: #f7fafc;
+  --color-satf-bg: #f8fbfe;
   --color-satf-surface: #ffffff;
   --color-satf-soft: #dcecf7;
   --color-satf-primary: #244d70;
